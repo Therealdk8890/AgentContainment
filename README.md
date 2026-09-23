@@ -4,6 +4,8 @@
 
 AgentContainment is a framework-agnostic control plane designed to intercept agent actions, enforce policy, halt compromised runs, revoke authority, contain blast radius, and preserve verifiable incident evidence.
 
+**Keywords:** AI agent security, agent containment, autonomous agent security, AI runtime security, AI agent firewall, agent firewall, AI agent sandbox, agent sandboxing, AI guardrails, agent governance, AI safety, runtime enforcement, action authorization, policy enforcement, kill switch, incident response, blast radius containment, eBPF, Linux cgroups, cgroup v2, zero trust, defense in depth, tamper-evident audit, security engineering, open source AI security.
+
 ## Core model
 
 `Detect → Prove → Halt → Contain → Map → Recover`
