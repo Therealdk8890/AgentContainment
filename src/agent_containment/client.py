@@ -10,9 +10,10 @@ from typing import Any
 class UnixControlClient:
     """Newline-delimited JSON client for the controller Unix socket."""
 
-    def __init__(self, path: str | Path, *, timeout: float = 2.0):
+    def __init__(self, path: str | Path, *, timeout: float = 2.0, identity_token: str | None = None):
         self.path = str(path)
         self.timeout = timeout
+        self.identity_token = identity_token
 
     def request(self, command: str, **fields: Any) -> dict[str, Any]:
         payload = {"command": command, **fields}
@@ -40,7 +41,10 @@ class UnixControlClient:
         return result
 
     def register(self, agent_id: str, metadata: dict[str, str] | None = None) -> dict[str, Any]:
-        return self.request("register", agent_id=agent_id, metadata=metadata or {})
+        result = self.request("register", agent_id=agent_id, metadata=metadata or {})
+        if result.get("ok") and isinstance(result.get("identity_token"), str):
+            self.identity_token = result["identity_token"]
+        return result
 
     def status(self, agent_id: str) -> dict[str, Any]:
         return self.request("status", agent_id=agent_id)
@@ -60,6 +64,8 @@ class UnixControlClient:
         *,
         risk: int = 0,
     ) -> dict[str, Any]:
+        if not self.identity_token:
+            raise RuntimeError("register the agent first to obtain an identity token")
         return self.request(
             "authorize",
             agent_id=agent_id,
@@ -67,6 +73,7 @@ class UnixControlClient:
             operation=operation,
             resource=resource,
             risk=risk,
+            identity_token=self.identity_token,
         )
 
 
