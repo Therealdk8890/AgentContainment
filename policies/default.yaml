@@ -1,0 +1,6 @@
+# Reference policy for the prototype.
+# The Python demo currently uses the same rules directly.
+denied_operations:
+  - delete_production
+  - exfiltrate_secret
+max_risk: 90
