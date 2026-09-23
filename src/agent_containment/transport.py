@@ -22,7 +22,8 @@ class UnixControlServer:
     """
 
     def __init__(self, service: ContainmentService, path: str | os.PathLike[str],
-                 *, mode: int = 0o660, max_message_bytes: int = 64 * 1024):
+                 *, mode: int = 0o660, max_message_bytes: int = 64 * 1024,
+                 allowed_uids: set[int] | None = None):
         self.service = service
         self.path = Path(path)
         self.mode = mode
