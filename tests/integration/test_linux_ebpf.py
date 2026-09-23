@@ -13,9 +13,15 @@ pytestmark = pytest.mark.integration
 
 
 def _run(cmd, *, env=None, timeout=10):
-    return subprocess.run(
-        cmd, check=True, text=True, capture_output=True, env=env, timeout=timeout
+    result = subprocess.run(
+        cmd, check=False, text=True, capture_output=True, env=env, timeout=timeout
     )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise AssertionError(
+            f"command failed ({result.returncode}): {detail or '<no diagnostic output>'}"
+        )
+    return result
 
 
 def _wait_for_file(path: Path, timeout=3):
@@ -83,16 +89,8 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         ready = pin_dir / "ready"
         child = subprocess.Popen(
             [
-                sys.executable,
-                "-c",
-                child_code,
-                str(group),
-                host,
-                str(port),
-                str(ready),
-                str(marker),
-                str(blocked),
-                str(escaped),
+                sys.executable, "-c", child_code, str(group), host, str(port),
+                str(ready), str(marker), str(blocked), str(escaped),
             ],
             stdin=subprocess.PIPE,
             text=True,
