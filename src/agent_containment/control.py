@@ -95,6 +95,11 @@ class ContainmentService:
                 )
             return managed.identity_cgroup
 
+    def identity_cgroup(self, agent_id: str) -> str | None:
+        """Return the controller-assigned cgroup identity for an agent."""
+        with self._lock:
+            return self._managed(agent_id).identity_cgroup
+
     def issue_identity_token(self, agent_id: str, *, peer_pid: int | None = None) -> str:
         """Issue a token after the controller has established workload identity."""
         if peer_pid is not None and peer_pid <= 0:
