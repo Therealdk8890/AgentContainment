@@ -55,6 +55,14 @@ class ContainmentService:
                 self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
 
+    def configure_containment(self, agent_id: str, containment: ContainmentController) -> None:
+        """Attach controller-owned enforcement to an already registered agent."""
+        with self._lock:
+            managed = self._managed(agent_id)
+            if containment.runtime is not managed.runtime:
+                raise ValueError("containment runtime must match the registered runtime")
+            managed.containment = containment
+
     def create_workload(self, agent_id: str) -> str:
         """Create the controller-owned cgroup identity boundary for an agent."""
         if self.cgroup_supervisor is None:
