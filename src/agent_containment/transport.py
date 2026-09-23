@@ -112,9 +112,8 @@ class UnixControlServer:
         if command == "register":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
-            runtime, token = self.service.register(
-                agent_id, metadata=self._metadata(request)
-            )
+            runtime = self.service.register(agent_id, metadata=self._metadata(request))
+            token = self.service.issue_identity_token(agent_id)
             return {
                 "ok": True,
                 "agent_id": agent_id,
