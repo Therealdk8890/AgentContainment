@@ -91,3 +91,55 @@ def test_cgroup_identity_cannot_be_bypassed_by_matching_pid_alone():
         peer_pid=123,
         cgroup_membership=lambda pid, path: False,
     ).decision is DecisionType.DENY
+
+
+def test_configure_containment_uses_public_api():
+    service = ContainmentService()
+    runtime = service.register("agent-public")
+    controller = ContainmentController(
+        runtime,
+        CapabilitySet({"network", "filesystem.write"}),
+    )
+
+    service.configure_containment("agent-public", controller)
+    report = service.contain("agent-public")
+
+    assert report.complete
+    assert controller.capabilities.capabilities == set()
+    assert service.status("agent-public") is RuntimeState.CONTAINED
+
+
+def test_configure_containment_rejects_different_runtime():
+    service = ContainmentService()
+    service.register("agent-public")
+    foreign = ContainmentController(Runtime("other-agent"))
+
+    try:
+        service.configure_containment("agent-public", foreign)
+    except ValueError as exc:
+        assert "runtime" in str(exc)
+    else:
+        raise AssertionError("foreign containment runtime must be rejected")
+
+
+def test_create_workload_is_controller_owned_and_unique():
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return f"/sys/fs/cgroup/{agent_id}"
+
+        def attach_pid(self, path, pid):
+            return None
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
+    service.register("agent-workload")
+
+    path = service.create_workload("agent-workload")
+    assert path.endswith("/agent-workload")
+    assert service.identity_cgroup("agent-workload") == path
+
+    try:
+        service.create_workload("agent-workload")
+    except ValueError as exc:
+        assert "already exists" in str(exc)
+    else:
+        raise AssertionError("duplicate workload creation must fail")
