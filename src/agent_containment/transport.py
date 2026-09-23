@@ -110,7 +110,7 @@ class UnixControlServer:
 
     def handle(self, request: Any, *, peer_uid: int | None = None) -> dict[str, Any]:
         if not isinstance(request, dict):
-            raise ControlProtocolError("request must be an object")
+            return {"ok": False, "error": "request must be an object"}
         command = request.get("command")
         if command == "register":
             self._require_privileged(peer_uid)
