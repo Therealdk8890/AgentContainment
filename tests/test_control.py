@@ -45,9 +45,16 @@ def test_identity_token_denies_missing_and_wrong_credentials():
 
 
 def test_cgroup_identity_requires_membership():
-    service = ContainmentService()
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return "/sys/fs/cgroup/demo"
+        def attach_pid(self, path, pid):
+            return None
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
     service.register("agent-1")
-    token = service.issue_identity_token("agent-1", cgroup_path="/sys/fs/cgroup/demo")
+    service.create_workload("agent-1")
+    token = service.issue_identity_token("agent-1")
 
     action = Action("agent-1", "a1", "read", "workspace")
     assert service.authorize(
@@ -66,9 +73,16 @@ def test_cgroup_identity_requires_membership():
 
 
 def test_cgroup_identity_cannot_be_bypassed_by_matching_pid_alone():
-    service = ContainmentService()
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return "/sys/fs/cgroup/demo"
+        def attach_pid(self, path, pid):
+            return None
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
     service.register("agent-1")
-    token = service.issue_identity_token("agent-1", peer_pid=123, cgroup_path="/sys/fs/cgroup/demo")
+    service.create_workload("agent-1")
+    token = service.issue_identity_token("agent-1", peer_pid=123)
 
     action = Action("agent-1", "a1", "read", "workspace")
     assert service.authorize(
