@@ -1,7 +1,6 @@
 import json
 import os
 import socket
-import struct
 import threading
 
 from agent_containment.control import ContainmentService
@@ -22,7 +21,7 @@ def _roundtrip(server, path, payload):
 
 def test_protocol_register_status_and_contain(tmp_path):
     path = tmp_path / "controller.sock"
-    server = UnixControlServer(ContainmentService(), path)
+    server = UnixControlServer(ContainmentService(), path, allowed_uids={os.getuid()}, privileged_uids={os.getuid()})
     server.start()
     try:
         assert _roundtrip(server, path, {"command": "register", "agent_id": "agent-1"})["state"] == "active"
