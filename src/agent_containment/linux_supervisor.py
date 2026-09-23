@@ -1,8 +1,4 @@
-"""Linux process supervision for AgentContainment.
-
-This module owns a dedicated cgroup v2 for an agent workload. Privileged host
-configuration remains a deployment concern.
-"""
+"""Linux process supervision for AgentContainment."""
 from __future__ import annotations
 
 import os
@@ -10,7 +6,7 @@ from pathlib import Path
 
 
 class LinuxCgroupSupervisor:
-    """Create and manage a dedicated cgroup v2 for one agent."""
+    """Create and manage a dedicated cgroup v2 for one agent workload."""
 
     def __init__(self, root: str | os.PathLike[str] = "/sys/fs/cgroup/agent-containment"):
         if os.name != "posix" or not Path("/sys/fs/cgroup/cgroup.controllers").exists():
@@ -39,6 +35,30 @@ class LinuxCgroupSupervisor:
         if not path.is_dir():
             raise ValueError(f"cgroup path does not exist: {path}")
         (path / "cgroup.procs").write_text(f"{pid}\n")
+
+    @staticmethod
+    def pid_cgroup_path(pid: int) -> str:
+        if pid <= 0:
+            raise ValueError("pid must be positive")
+        status = Path(f"/proc/{pid}/cgroup")
+        if not status.is_file():
+            raise ProcessLookupError(pid)
+        for line in status.read_text().splitlines():
+            hierarchy, _, path = line.partition(":")
+            if hierarchy == "0" and path:
+                return path
+        raise RuntimeError(f"process {pid} has no cgroup v2 membership")
+
+    @classmethod
+    def pid_in_cgroup(cls, pid: int, cgroup_path: str | os.PathLike[str]) -> bool:
+        """Return whether pid is inside the requested cgroup v2 subtree."""
+        requested = Path(cgroup_path).resolve()
+        actual = Path("/sys/fs/cgroup", cls.pid_cgroup_path(pid).lstrip("/")).resolve()
+        try:
+            actual.relative_to(requested)
+            return True
+        except ValueError:
+            return False
 
     @staticmethod
     def is_populated(cgroup_path: str | os.PathLike[str]) -> bool:
