@@ -28,6 +28,7 @@ class UnixControlServer:
         self.path = Path(path)
         self.mode = mode
         self.max_message_bytes = max_message_bytes
+        self.allowed_uids = allowed_uids
         self._sock: socket.socket | None = None
 
     def start(self) -> None:
@@ -57,6 +58,9 @@ class UnixControlServer:
             raise RuntimeError("server is not started")
         conn, _ = self._sock.accept()
         with conn:
+            if not self._peer_allowed(conn):
+                self._send(conn, {"ok": False, "error": "unauthorized_peer"})
+                return
             conn.settimeout(2.0)
             data = bytearray()
             while len(data) <= self.max_message_bytes:
@@ -141,6 +145,19 @@ class UnixControlServer:
         ):
             raise ControlProtocolError("metadata must be a string-to-string object")
         return metadata
+
+    def _peer_allowed(self, conn: socket.socket) -> bool:
+        if self.allowed_uids is None:
+            return True
+        if not hasattr(socket, "SO_PEERCRED"):
+            return False
+        try:
+            import struct
+            raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            _pid, uid, _gid = struct.unpack("3i", raw)
+            return uid in self.allowed_uids
+        except (OSError, struct.error):
+            return False
 
     @staticmethod
     def _send(conn: socket.socket, response: dict[str, Any]) -> None:
