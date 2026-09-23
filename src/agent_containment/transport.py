@@ -17,11 +17,7 @@ class ControlProtocolError(ValueError):
 
 
 class UnixControlServer:
-    """Small newline-delimited JSON protocol over a filesystem Unix socket.
-
-    The socket is controller-owned and defaults to mode 0660. Commands are
-    deliberately narrow: register, status, contain, report, and snapshot.
-    """
+    """Newline-delimited JSON protocol over a controller-owned Unix socket."""
 
     def __init__(self, service: ContainmentService, path: str | os.PathLike[str],
                  *, mode: int = 0o660, max_message_bytes: int = 64 * 1024,
@@ -51,7 +47,6 @@ class UnixControlServer:
         self._sock.listen(16)
 
     def serve_forever(self, *, stop_event: Event | None = None) -> None:
-        """Serve requests until close() or the supplied stop event is set."""
         if self._sock is None:
             raise RuntimeError("server is not started")
         self._sock.settimeout(0.25)
@@ -113,19 +108,30 @@ class UnixControlServer:
         if not isinstance(request, dict):
             return {"ok": False, "error": "request must be an object"}
         command = request.get("command")
+
         if command == "register":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
-            runtime = self.service.register(
+            runtime, token = self.service.register(
                 agent_id, metadata=self._metadata(request)
             )
-            return {"ok": True, "agent_id": agent_id, "state": runtime.state.value}
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "state": runtime.state.value,
+                "identity_token": token,
+            }
+
         if command == "status":
             agent_id = self._agent_id(request)
             return {"ok": True, "agent_id": agent_id,
                     "state": self.service.status(agent_id).value}
+
         if command == "authorize":
             agent_id = self._agent_id(request)
+            identity_token = request.get("identity_token")
+            if not isinstance(identity_token, str) or not identity_token:
+                raise ControlProtocolError("identity_token is required")
             action_id = request.get("action_id")
             operation = request.get("operation")
             resource = request.get("resource")
@@ -139,11 +145,13 @@ class UnixControlServer:
             if not isinstance(risk, int) or isinstance(risk, bool) or not 0 <= risk <= 100:
                 raise ControlProtocolError("risk must be an integer from 0 to 100")
             decision = self.service.authorize(
-                Action(agent_id, action_id, operation, resource, risk=risk)
+                Action(agent_id, action_id, operation, resource, risk=risk),
+                identity_token=identity_token,
             )
             return {"ok": True, "agent_id": agent_id, "action_id": action_id,
                     "decision": decision.decision.value, "reason": decision.reason,
                     "timestamp": decision.timestamp}
+
         if command == "contain":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
@@ -156,6 +164,7 @@ class UnixControlServer:
                         "failures": list(report.failures),
                         "complete": report.complete,
                     }}
+
         if command == "report":
             agent_id = self._agent_id(request)
             report = self.service.report(agent_id)
@@ -168,11 +177,13 @@ class UnixControlServer:
                         "failures": list(report.failures),
                         "complete": report.complete,
                     }}
+
         if command == "snapshot":
             return {"ok": True, "agents": {
                 agent_id: state.value
                 for agent_id, state in self.service.snapshot().items()
             }}
+
         raise ControlProtocolError("unsupported command")
 
     @staticmethod
@@ -206,11 +217,7 @@ class UnixControlServer:
             return None
         try:
             import struct
-            raw = conn.getsockopt(
-                socket.SOL_SOCKET,
-                socket.SO_PEERCRED,
-                struct.calcsize("3i"),
-            )
+            raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
             _pid, uid, _gid = struct.unpack("3i", raw)
             return uid
         except (OSError, struct.error):
