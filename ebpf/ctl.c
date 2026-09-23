@@ -35,19 +35,39 @@ static int attach_program(const char *obj_path, const char *cgroup_path, const c
     unlink(link_path);
 
     cgroup_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (cgroup_fd < 0) { perror("open cgroup"); goto out; }
+    if (cgroup_fd < 0) {
+        fprintf(stderr, "open cgroup %s failed: %s\n", cgroup_path, strerror(errno));
+        goto out;
+    }
 
     libbpf_set_strict_mode(LIBBPF_STRICT_ALL);
     obj = bpf_object__open_file(obj_path, NULL);
-    if (!obj) { fprintf(stderr, "bpf_object__open_file failed\n"); goto out; }
-    if (bpf_object__load(obj)) { fprintf(stderr, "bpf_object__load failed\n"); goto out; }
+    if (!obj) {
+        fprintf(stderr, "bpf_object__open_file failed for %s\n", obj_path);
+        goto out;
+    }
+    if (bpf_object__load(obj)) {
+        fprintf(stderr, "bpf_object__load failed: %s\n", strerror(errno));
+        goto out;
+    }
 
     prog = bpf_object__find_program_by_name(obj, "agent_containment_egress");
-    if (!prog) { fprintf(stderr, "program not found\n"); goto out; }
+    if (!prog) {
+        fprintf(stderr, "program not found\n");
+        goto out;
+    }
 
     link = bpf_program__attach_cgroup(prog, cgroup_fd);
-    if (!link) { fprintf(stderr, "bpf_program__attach_cgroup failed\n"); goto out; }
-    if (bpf_link__pin(link, link_path)) { fprintf(stderr, "bpf_link__pin failed: %s\n", strerror(errno)); goto out; }
+    if (!link) {
+        int err = -libbpf_get_error(link);
+        fprintf(stderr, "bpf_program__attach_cgroup failed: %s (errno=%d)\n",
+                strerror(err > 0 ? err : errno), err > 0 ? err : errno);
+        goto out;
+    }
+    if (bpf_link__pin(link, link_path)) {
+        fprintf(stderr, "bpf_link__pin failed: %s\n", strerror(errno));
+        goto out;
+    }
 
     printf("attached egress blocker to %s\n", cgroup_path);
     rc = 0;
@@ -64,7 +84,10 @@ static int detach_program(const char *pin_dir)
 {
     char link_path[PATH_MAX];
     snprintf(link_path, sizeof(link_path), "%s/egress_link", pin_dir);
-    if (unlink(link_path) < 0 && errno != ENOENT) { perror("unlink egress_link"); return -1; }
+    if (unlink(link_path) < 0 && errno != ENOENT) {
+        perror("unlink egress_link");
+        return -1;
+    }
     return 0;
 }
 
