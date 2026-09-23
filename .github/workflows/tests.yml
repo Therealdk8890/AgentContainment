@@ -16,3 +16,11 @@ jobs:
       - run: pip install -e .
       - run: pip install pytest
       - run: pytest -q
+  ebpf-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install eBPF build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
+      - name: Build eBPF containment controller
+        run: bash scripts/build_ebpf.sh
