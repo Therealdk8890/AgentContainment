@@ -24,12 +24,14 @@ class UnixControlServer:
 
     def __init__(self, service: ContainmentService, path: str | os.PathLike[str],
                  *, mode: int = 0o660, max_message_bytes: int = 64 * 1024,
-                 allowed_uids: set[int] | None = None):
+                 allowed_uids: set[int] | None = None,
+                 privileged_uids: set[int] | None = None):
         self.service = service
         self.path = Path(path)
         self.mode = mode
         self.max_message_bytes = max_message_bytes
         self.allowed_uids = allowed_uids
+        self.privileged_uids = privileged_uids
         self._sock: socket.socket | None = None
         self._stop = Event()
 
@@ -99,6 +101,8 @@ class UnixControlServer:
                 return
             try:
                 request = json.loads(line)
+                if isinstance(request, dict):
+                    request["_peer_uid"] = self._peer_uid(conn)
                 response = self.handle(request)
             except (json.JSONDecodeError, ControlProtocolError, KeyError, ValueError) as exc:
                 response = {"ok": False, "error": str(exc)}
@@ -111,6 +115,7 @@ class UnixControlServer:
             raise ControlProtocolError("request must be an object")
         command = request.get("command")
         if command == "register":
+            self._require_privileged(request)
             agent_id = self._agent_id(request)
             runtime = self.service.register(
                 agent_id, metadata=self._metadata(request)
@@ -121,6 +126,7 @@ class UnixControlServer:
             return {"ok": True, "agent_id": agent_id,
                     "state": self.service.status(agent_id).value}
         if command == "contain":
+            self._require_privileged(request)
             agent_id = self._agent_id(request)
             report = self.service.contain(agent_id)
             return {"ok": True, "agent_id": agent_id,
@@ -165,6 +171,14 @@ class UnixControlServer:
         ):
             raise ControlProtocolError("metadata must be a string-to-string object")
         return metadata
+
+    def _require_privileged(self, request: dict[str, Any]) -> None:
+        uid = request.pop("_peer_uid", None)
+        allowed = self.privileged_uids
+        if allowed is None:
+            allowed = self.allowed_uids
+        if allowed is None or uid not in allowed:
+            raise ControlProtocolError("forbidden_command")
 
     def _peer_allowed(self, conn: socket.socket) -> bool:
         if self.allowed_uids is None:
