@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .control import ContainmentService
+from .models import Action
 
 
 class ControlProtocolError(ValueError):
@@ -123,6 +124,26 @@ class UnixControlServer:
             agent_id = self._agent_id(request)
             return {"ok": True, "agent_id": agent_id,
                     "state": self.service.status(agent_id).value}
+        if command == "authorize":
+            agent_id = self._agent_id(request)
+            action_id = request.get("action_id")
+            operation = request.get("operation")
+            resource = request.get("resource")
+            risk = request.get("risk", 0)
+            if not isinstance(action_id, str) or not action_id or len(action_id) > 256:
+                raise ControlProtocolError("action_id must be a non-empty string of at most 256 characters")
+            if not isinstance(operation, str) or not operation or len(operation) > 256:
+                raise ControlProtocolError("operation must be a non-empty string of at most 256 characters")
+            if not isinstance(resource, str) or not resource or len(resource) > 4096:
+                raise ControlProtocolError("resource must be a non-empty string of at most 4096 characters")
+            if not isinstance(risk, int) or isinstance(risk, bool) or not 0 <= risk <= 100:
+                raise ControlProtocolError("risk must be an integer from 0 to 100")
+            decision = self.service.authorize(
+                Action(agent_id, action_id, operation, resource, risk=risk)
+            )
+            return {"ok": True, "agent_id": agent_id, "action_id": action_id,
+                    "decision": decision.decision.value, "reason": decision.reason,
+                    "timestamp": decision.timestamp}
         if command == "contain":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
