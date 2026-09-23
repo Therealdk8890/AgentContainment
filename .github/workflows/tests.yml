@@ -15,6 +15,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install pytest
       - run: PYTHONPATH=src pytest -q
+
   ebpf-build:
     runs-on: ubuntu-latest
     steps:
@@ -23,8 +24,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
       - name: Build eBPF containment controller
         run: bash scripts/build_ebpf.sh
+
+  # This job uses sudo and is intentionally restricted to pushes to the
+  # repository. Never execute privileged test code from untrusted PRs/forks.
   ebpf-privileged-integration:
-    if: ${{ vars.AGENT_CONTAINMENT_ENABLE_PRIVILEGED_EBPF == 'true' }}
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
