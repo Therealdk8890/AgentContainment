@@ -124,7 +124,7 @@ class UnixControlServer:
             return {"ok": True, "agent_id": agent_id,
                     "state": self.service.status(agent_id).value}
         if command == "contain":
-            self._require_privileged(request)
+            self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
             report = self.service.contain(agent_id)
             return {"ok": True, "agent_id": agent_id,
@@ -170,7 +170,7 @@ class UnixControlServer:
             raise ControlProtocolError("metadata must be a string-to-string object")
         return metadata
 
-    def _require_privileged(self, uid: int | None) -> None
+    def _require_privileged(self, uid: int | None) -> None:
         if self.privileged_uids is not None:
             allowed = self.privileged_uids
         elif self.allowed_uids is not None:
@@ -179,6 +179,21 @@ class UnixControlServer:
             return
         if uid is None or uid not in allowed:
             raise ControlProtocolError("forbidden_command")
+
+    def _peer_uid(self, conn: socket.socket) -> int | None:
+        if not hasattr(socket, "SO_PEERCRED"):
+            return None
+        try:
+            import struct
+            raw = conn.getsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_PEERCRED,
+                struct.calcsize("3i"),
+            )
+            _pid, uid, _gid = struct.unpack("3i", raw)
+            return uid
+        except (OSError, struct.error):
+            return None
 
     def _peer_allowed(self, conn: socket.socket) -> bool:
         if self.allowed_uids is None:
