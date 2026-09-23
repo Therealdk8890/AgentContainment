@@ -13,7 +13,9 @@ pytestmark = pytest.mark.integration
 
 
 def _run(cmd, *, env=None, timeout=10):
-    return subprocess.run(cmd, check=True, text=True, capture_output=True, env=env, timeout=timeout)
+    return subprocess.run(
+        cmd, check=True, text=True, capture_output=True, env=env, timeout=timeout
+    )
 
 
 def _wait_for_file(path: Path, timeout=3):
@@ -45,7 +47,8 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     group = root / f"agent-containment-test-{os.getpid()}"
     pin_dir = Path(tempfile.mkdtemp(prefix="agent-containment-bpf-"))
     marker = pin_dir / "connected"
-    payload = pin_dir / "payload"
+    blocked = pin_dir / "blocked"
+    escaped = pin_dir / "escaped"
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -56,17 +59,46 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     host, port = server.getsockname()
 
     child_code = (
-        "import socket,sys,time\n"
-        "s=socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=2)\n"
+        "import os,socket,sys,time\n"
+        "group=sys.argv[1]\n"
+        "with open(group + '/cgroup.procs','w') as f: f.write(str(os.getpid()))\n"
+        "open(sys.argv[4],'w').write('ready')\n"
+        "s=socket.create_connection((sys.argv[2],int(sys.argv[3])),timeout=2)\n"
         "s.sendall(b'pre-containment')\n"
-        "open(sys.argv[3],'w').write('connected')\n"
-        "time.sleep(30)\n"
+        "open(sys.argv[5],'w').write('connected')\n"
+        "s.close()\n"
+        "if sys.stdin.readline().strip() != 'go': sys.exit(2)\n"
+        "try:\n"
+        "    s=socket.create_connection((sys.argv[2],int(sys.argv[3])),timeout=1)\n"
+        "    s.sendall(b'post-containment')\n"
+        "    open(sys.argv[7],'w').write('escaped')\n"
+        "    s.close()\n"
+        "except OSError:\n"
+        "    open(sys.argv[6],'w').write('blocked')\n"
+        "time.sleep(1)\n"
     )
     child = None
     try:
         group.mkdir()
-        child = subprocess.Popen([sys.executable, "-c", child_code, host, str(port), str(marker)])
-        (group / "cgroup.procs").write_text(str(child.pid))
+        ready = pin_dir / "ready"
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                child_code,
+                str(group),
+                host,
+                str(port),
+                str(ready),
+                str(marker),
+                str(blocked),
+                str(escaped),
+            ],
+            stdin=subprocess.PIPE,
+            text=True,
+        )
+
+        _wait_for_file(ready)
         _wait_for_file(marker)
 
         conn, _ = server.accept()
@@ -75,29 +107,29 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
 
         _run([str(controller), "attach", str(obj), str(group), str(pin_dir)])
 
-        probe = subprocess.run(
-            [sys.executable, "-c",
-             "import socket,sys; s=socket.socket(); s.settimeout(0.5); s.connect((sys.argv[1],int(sys.argv[2])))",
-             host, str(port)],
-            text=True, capture_output=True, timeout=3,
-        )
-        assert probe.returncode != 0, probe.stdout + probe.stderr
+        assert child.stdin is not None
+        child.stdin.write("go\n")
+        child.stdin.flush()
+
+        _wait_for_file(blocked)
+        assert not escaped.exists()
 
         with pytest.raises(socket.timeout):
             server.accept()
+
+        child.wait(timeout=3)
+        assert child.returncode == 0
     finally:
         if child is not None and child.poll() is None:
             child.kill()
             child.wait(timeout=3)
         subprocess.run([str(controller), "detach", str(pin_dir)], check=False)
         try:
-            if (group / "cgroup.procs").exists():
-                pass
             group.rmdir()
         except OSError:
             pass
         server.close()
-        for p in (marker, payload):
+        for p in (marker, blocked, escaped, pin_dir / "ready"):
             p.unlink(missing_ok=True)
         try:
             pin_dir.rmdir()
