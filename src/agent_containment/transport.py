@@ -116,12 +116,16 @@ class UnixControlServer:
         if command == "register":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
-            cgroup_path = self._optional_cgroup(request)
             runtime = self.service.register(agent_id, metadata=self._metadata(request))
-            token = self.service.issue_identity_token(
-                agent_id,
-                cgroup_path=cgroup_path,
-            )
+            cgroup_path = self.service.create_workload(agent_id) if self.service.cgroup_supervisor is not None else None
+            workload_pid = request.get("workload_pid")
+            if workload_pid is not None:
+                if not isinstance(workload_pid, int) or isinstance(workload_pid, bool) or workload_pid <= 0:
+                    raise ControlProtocolError("workload_pid must be a positive integer")
+                if cgroup_path is None:
+                    raise ControlProtocolError("workload_pid requires a configured cgroup supervisor")
+                self.service.attach_workload(agent_id, workload_pid)
+            token = self.service.issue_identity_token(agent_id, peer_pid=workload_pid) if workload_pid is not None else None
             return {
                 "ok": True,
                 "agent_id": agent_id,
@@ -153,7 +157,7 @@ class UnixControlServer:
             if not isinstance(risk, int) or isinstance(risk, bool) or not 0 <= risk <= 100:
                 raise ControlProtocolError("risk must be an integer from 0 to 100")
             membership = None
-            if self._registered_cgroup(agent_id) is not None:
+            if self.service.identity_cgroup(agent_id) is not None:
                 membership = LinuxCgroupSupervisor.pid_in_cgroup
             decision = self.service.authorize(
                 Action(agent_id, action_id, operation, resource, risk=risk),
@@ -208,9 +212,6 @@ class UnixControlServer:
         if not path.is_absolute() or not path.is_dir():
             raise ControlProtocolError("cgroup_path must be an existing absolute directory")
         return str(path.resolve())
-
-    def _registered_cgroup(self, agent_id: str) -> str | None:
-        return self.service._agents[agent_id].identity_cgroup
 
     @staticmethod
     def _metadata(request: dict[str, Any]) -> dict[str, str]:
