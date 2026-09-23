@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from threading import RLock
 
+from .audit import AuditLog
 from .containment import ContainmentController, ContainmentReport
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
@@ -26,9 +27,10 @@ class ManagedAgent:
 class ContainmentService:
     """Controller-owned registry and containment API."""
 
-    def __init__(self):
+    def __init__(self, audit: AuditLog | None = None):
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
+        self.audit = audit
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -45,15 +47,26 @@ class ContainmentService:
                 metadata=dict(metadata or {}),
                 policy=policy or PolicyEngine(),
             )
+            if self.audit:
+                self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
 
     def authorize(self, action: Action) -> Decision:
         managed = self._managed(action.agent_id)
         if not managed.runtime.can_execute:
-            return Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
-        decision = managed.policy.evaluate(action)
-        if decision.decision is DecisionType.HALT:
-            managed.containment.halt()
+            decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
+        else:
+            decision = managed.policy.evaluate(action)
+            if decision.decision is DecisionType.HALT:
+                managed.containment.halt()
+        if self.audit:
+            self.audit.record(
+                "authorization_decision",
+                agent_id=action.agent_id,
+                action_id=action.action_id,
+                decision=decision.decision.value,
+                reason=decision.reason,
+            )
         return decision
 
     def unregister(self, agent_id: str) -> None:
@@ -64,7 +77,19 @@ class ContainmentService:
         return self._managed(agent_id).runtime.state
 
     def contain(self, agent_id: str) -> ContainmentReport:
-        return self._managed(agent_id).containment.contain()
+        report = self._managed(agent_id).containment.contain()
+        if self.audit:
+            self.audit.record(
+                "containment",
+                agent_id=agent_id,
+                decision=DecisionType.CONTAIN.value,
+                reason="controller containment requested",
+                epoch=report.epoch,
+                stages=list(report.stages),
+                failures=list(report.failures),
+                complete=report.complete,
+            )
+        return report
 
     def report(self, agent_id: str) -> ContainmentReport | None:
         return self._managed(agent_id).containment.last_report
