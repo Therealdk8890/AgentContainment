@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import RLock
 from typing import Callable
 
@@ -27,12 +28,13 @@ class ManagedAgent:
 
 
 class ContainmentService:
-    """Controller-owned registry and containment API."""
+    """Controller-owned registry, identity, and containment API."""
 
-    def __init__(self, audit: AuditLog | None = None):
+    def __init__(self, audit: AuditLog | None = None, cgroup_supervisor=None):
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
         self.audit = audit
+        self.cgroup_supervisor = cgroup_supervisor
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -40,9 +42,7 @@ class ContainmentService:
         with self._lock:
             if agent_id in self._agents:
                 raise ValueError(f"agent already registered: {agent_id}")
-            runtime = containment.runtime if containment is not None else __import__(
-                "agent_containment.runtime", fromlist=["Runtime"]
-            ).Runtime(agent_id)
+            runtime = containment.runtime if containment is not None else Runtime(agent_id)
             if runtime.agent_id != agent_id:
                 raise ValueError("containment runtime agent_id does not match registration")
             self._agents[agent_id] = ManagedAgent(
@@ -55,50 +55,72 @@ class ContainmentService:
                 self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
 
-    def issue_identity_token(
-        self,
-        agent_id: str,
-        *,
-        peer_pid: int | None = None,
-        cgroup_path: str | None = None,
-    ) -> str:
-        """Issue a token bound to the registering workload identity."""
-        if peer_pid is not None and peer_pid <= 0:
-            raise ValueError("peer_pid must be positive")
-        if cgroup_path is not None and not cgroup_path:
-            raise ValueError("cgroup_path must be non-empty")
+    def create_workload(self, agent_id: str) -> str:
+        """Create the controller-owned cgroup identity boundary for an agent."""
+        if self.cgroup_supervisor is None:
+            raise RuntimeError("cgroup supervisor is not configured")
         with self._lock:
             managed = self._managed(agent_id)
+            if managed.identity_cgroup is not None:
+                raise ValueError(f"agent workload already exists: {agent_id}")
+            path = self.cgroup_supervisor.create_agent(agent_id)
+            managed.identity_cgroup = str(Path(path).resolve())
+            if self.audit:
+                self.audit.record(
+                    "workload_created",
+                    agent_id=agent_id,
+                    reason="controller-created cgroup identity boundary",
+                    cgroup_path=managed.identity_cgroup,
+                )
+            return managed.identity_cgroup
+
+    def attach_workload(self, agent_id: str, pid: int) -> str:
+        """Attach a process to the controller-created workload cgroup."""
+        if self.cgroup_supervisor is None:
+            raise RuntimeError("cgroup supervisor is not configured")
+        if pid <= 0:
+            raise ValueError("pid must be positive")
+        with self._lock:
+            managed = self._managed(agent_id)
+            if managed.identity_cgroup is None:
+                raise RuntimeError("agent workload has not been created")
+            self.cgroup_supervisor.attach_pid(managed.identity_cgroup, pid)
+            if self.audit:
+                self.audit.record(
+                    "workload_attached",
+                    agent_id=agent_id,
+                    reason="controller attached process to workload cgroup",
+                    pid=pid,
+                    cgroup_path=managed.identity_cgroup,
+                )
+            return managed.identity_cgroup
+
+    def issue_identity_token(self, agent_id: str, *, peer_pid: int | None = None) -> str:
+        """Issue a token after the controller has established workload identity."""
+        if peer_pid is not None and peer_pid <= 0:
+            raise ValueError("peer_pid must be positive")
+        with self._lock:
+            managed = self._managed(agent_id)
+            if managed.identity_cgroup is None:
+                raise RuntimeError("create_workload must establish cgroup identity first")
             token = secrets.token_urlsafe(32)
             managed.identity_digest = self._digest_token(token)
             managed.identity_pid = peer_pid
-            managed.identity_cgroup = cgroup_path
             return token
 
-    def authorize(
-        self,
-        action: Action,
-        *,
-        identity_token: str | None = None,
-        peer_pid: int | None = None,
-        cgroup_membership: Callable[[int, str], bool] | None = None,
-    ) -> Decision:
+    def authorize(self, action: Action, *, identity_token: str | None = None,
+                  peer_pid: int | None = None,
+                  cgroup_membership: Callable[[int, str], bool] | None = None) -> Decision:
         managed = self._managed(action.agent_id)
         authenticated = (
-            managed.identity_digest is None
-            or (
-                bool(identity_token)
-                and self._token_matches(identity_token, managed.identity_digest)
-                and (managed.identity_pid is None or peer_pid == managed.identity_pid)
-                and (
-                    managed.identity_cgroup is None
-                    or (
-                        peer_pid is not None
-                        and cgroup_membership is not None
-                        and cgroup_membership(peer_pid, managed.identity_cgroup)
-                    )
-                )
-            )
+            bool(identity_token)
+            and managed.identity_digest is not None
+            and self._token_matches(identity_token, managed.identity_digest)
+            and (managed.identity_pid is None or peer_pid == managed.identity_pid)
+            and managed.identity_cgroup is not None
+            and peer_pid is not None
+            and cgroup_membership is not None
+            and cgroup_membership(peer_pid, managed.identity_cgroup)
         )
         if not authenticated:
             decision = Decision(action.action_id, DecisionType.DENY, "agent identity is not authenticated")
@@ -111,10 +133,8 @@ class ContainmentService:
             managed.containment.halt()
         if self.audit:
             self.audit.record(
-                "authorization_decision",
-                agent_id=action.agent_id,
-                action_id=action.action_id,
-                decision=decision.decision.value,
+                "authorization_decision", agent_id=action.agent_id,
+                action_id=action.action_id, decision=decision.decision.value,
                 reason=decision.reason,
             )
         return decision
@@ -130,13 +150,9 @@ class ContainmentService:
         report = self._managed(agent_id).containment.contain()
         if self.audit:
             self.audit.record(
-                "containment",
-                agent_id=agent_id,
-                decision=DecisionType.CONTAIN.value,
-                reason="controller containment requested",
-                epoch=report.epoch,
-                stages=list(report.stages),
-                failures=list(report.failures),
+                "containment", agent_id=agent_id, decision=DecisionType.CONTAIN.value,
+                reason="controller containment requested", epoch=report.epoch,
+                stages=list(report.stages), failures=list(report.failures),
                 complete=report.complete,
             )
         return report
@@ -157,8 +173,7 @@ class ContainmentService:
         return hmac.compare_digest(ContainmentService._digest_token(token), digest)
 
     def _managed(self, agent_id: str) -> ManagedAgent:
-        with self._lock:
-            try:
-                return self._agents[agent_id]
-            except KeyError as exc:
-                raise KeyError(f"unknown agent: {agent_id}") from exc
+        try:
+            return self._agents[agent_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown agent: {agent_id}") from exc
