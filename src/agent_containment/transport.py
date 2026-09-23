@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import struct
 from threading import Event
 from pathlib import Path
 from typing import Any
@@ -76,7 +77,8 @@ class UnixControlServer:
             raise RuntimeError("server is not started")
         conn, _ = self._sock.accept()
         with conn:
-            if not self._peer_allowed(conn):
+            peer_uid, peer_pid = self._peer_credentials(conn)
+            if not self._peer_allowed(peer_uid):
                 self._send(conn, {"ok": False, "error": "unauthorized_peer"})
                 return
             conn.settimeout(2.0)
@@ -97,14 +99,15 @@ class UnixControlServer:
                 return
             try:
                 request = json.loads(line)
-                response = self.handle(request, peer_uid=self._peer_uid(conn))
+                response = self.handle(request, peer_uid=peer_uid, peer_pid=peer_pid)
             except (json.JSONDecodeError, ControlProtocolError, KeyError, ValueError) as exc:
                 response = {"ok": False, "error": str(exc)}
             except Exception:
                 response = {"ok": False, "error": "internal_error"}
             self._send(conn, response)
 
-    def handle(self, request: Any, *, peer_uid: int | None = None) -> dict[str, Any]:
+    def handle(self, request: Any, *, peer_uid: int | None = None,
+               peer_pid: int | None = None) -> dict[str, Any]:
         if not isinstance(request, dict):
             return {"ok": False, "error": "request must be an object"}
         command = request.get("command")
@@ -113,13 +116,9 @@ class UnixControlServer:
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
             runtime = self.service.register(agent_id, metadata=self._metadata(request))
-            token = self.service.issue_identity_token(agent_id)
-            return {
-                "ok": True,
-                "agent_id": agent_id,
-                "state": runtime.state.value,
-                "identity_token": token,
-            }
+            token = self.service.issue_identity_token(agent_id, peer_pid=peer_pid)
+            return {"ok": True, "agent_id": agent_id, "state": runtime.state.value,
+                    "identity_token": token}
 
         if command == "status":
             agent_id = self._agent_id(request)
@@ -146,6 +145,7 @@ class UnixControlServer:
             decision = self.service.authorize(
                 Action(agent_id, action_id, operation, resource, risk=risk),
                 identity_token=identity_token,
+                peer_pid=peer_pid,
             )
             return {"ok": True, "agent_id": agent_id, "action_id": action_id,
                     "decision": decision.decision.value, "reason": decision.reason,
@@ -157,12 +157,8 @@ class UnixControlServer:
             report = self.service.contain(agent_id)
             return {"ok": True, "agent_id": agent_id,
                     "state": self.service.status(agent_id).value,
-                    "containment": {
-                        "epoch": report.epoch,
-                        "stages": list(report.stages),
-                        "failures": list(report.failures),
-                        "complete": report.complete,
-                    }}
+                    "containment": {"epoch": report.epoch, "stages": list(report.stages),
+                                    "failures": list(report.failures), "complete": report.complete}}
 
         if command == "report":
             agent_id = self._agent_id(request)
@@ -170,17 +166,12 @@ class UnixControlServer:
             if report is None:
                 return {"ok": True, "agent_id": agent_id, "containment": None}
             return {"ok": True, "agent_id": agent_id,
-                    "containment": {
-                        "epoch": report.epoch,
-                        "stages": list(report.stages),
-                        "failures": list(report.failures),
-                        "complete": report.complete,
-                    }}
+                    "containment": {"epoch": report.epoch, "stages": list(report.stages),
+                                    "failures": list(report.failures), "complete": report.complete}}
 
         if command == "snapshot":
             return {"ok": True, "agents": {
-                agent_id: state.value
-                for agent_id, state in self.service.snapshot().items()
+                agent_id: state.value for agent_id, state in self.service.snapshot().items()
             }}
 
         raise ControlProtocolError("unsupported command")
@@ -202,38 +193,24 @@ class UnixControlServer:
         return metadata
 
     def _require_privileged(self, uid: int | None) -> None:
-        if self.privileged_uids is not None:
-            allowed = self.privileged_uids
-        elif self.allowed_uids is not None:
-            allowed = self.allowed_uids
-        else:
-            return
-        if uid is None or uid not in allowed:
+        allowed = self.privileged_uids if self.privileged_uids is not None else self.allowed_uids
+        if allowed is not None and (uid is None or uid not in allowed):
             raise ControlProtocolError("forbidden_command")
 
-    def _peer_uid(self, conn: socket.socket) -> int | None:
+    def _peer_credentials(self, conn: socket.socket) -> tuple[int | None, int | None]:
         if not hasattr(socket, "SO_PEERCRED"):
-            return None
+            return None, None
         try:
-            import struct
             raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            _pid, uid, _gid = struct.unpack("3i", raw)
-            return uid
+            pid, uid, _gid = struct.unpack("3i", raw)
+            return uid, pid
         except (OSError, struct.error):
-            return None
+            return None, None
 
-    def _peer_allowed(self, conn: socket.socket) -> bool:
+    def _peer_allowed(self, uid: int | None) -> bool:
         if self.allowed_uids is None:
             return True
-        if not hasattr(socket, "SO_PEERCRED"):
-            return False
-        try:
-            import struct
-            raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            _pid, uid, _gid = struct.unpack("3i", raw)
-            return uid in self.allowed_uids
-        except (OSError, struct.error):
-            return False
+        return uid is not None and uid in self.allowed_uids
 
     @staticmethod
     def _send(conn: socket.socket, response: dict[str, Any]) -> None:
