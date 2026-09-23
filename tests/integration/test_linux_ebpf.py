@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from agent_containment.containment import ContainmentController
+from agent_containment.control import ContainmentService
+from agent_containment.egress_enforcement import LinuxEbpfEgressEnforcer
+
 
 pytestmark = pytest.mark.integration
 
@@ -108,7 +112,20 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert conn.recv(64) == b"pre-containment"
         conn.close()
 
-        _run([str(controller), "attach", str(obj), str(group), str(pin_dir)])
+        runtime_service = ContainmentService()
+        enforcer = LinuxEbpfEgressEnforcer(
+            str(controller), str(obj), str(group), str(pin_dir)
+        )
+        runtime_service.register(
+            "adversarial-agent",
+            containment=ContainmentController(
+                __import__("agent_containment.runtime", fromlist=["Runtime"]).Runtime("adversarial-agent"),
+                kernel_egress=enforcer,
+            ),
+        )
+        report = runtime_service.contain("adversarial-agent")
+        assert report.complete
+        assert "kernel_egress_contained" in report.stages
 
         assert child.stdin is not None
         child.stdin.write("go\n")
