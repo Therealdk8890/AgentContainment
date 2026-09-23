@@ -85,3 +85,152 @@ def test_peer_uid_can_read_but_cannot_contain_without_privilege(tmp_path):
         assert register["error"] == "forbidden_command"
     finally:
         server.close()
+
+
+def test_transport_workload_registration_issues_bound_token_and_authorizes(tmp_path, monkeypatch):
+    path = tmp_path / "controller.sock"
+
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return tmp_path / agent_id
+
+        def attach_pid(self, cgroup_path, pid):
+            self.attached = (str(cgroup_path), pid)
+
+    monkeypatch.setattr(
+        "agent_containment.transport.LinuxCgroupSupervisor.pid_in_cgroup",
+        lambda pid, cgroup_path: pid == os.getpid(),
+    )
+
+    server = UnixControlServer(
+        ContainmentService(cgroup_supervisor=FakeSupervisor()),
+        path,
+        allowed_uids={os.getuid()},
+        privileged_uids={os.getuid()},
+    )
+    server.start()
+    try:
+        register = _roundtrip(
+            server,
+            path,
+            {
+                "command": "register",
+                "agent_id": "agent-transport",
+                "workload_pid": os.getpid(),
+            },
+        )
+        assert register["ok"] is True
+        assert isinstance(register["identity_token"], str)
+        assert register["identity_token"]
+
+        decision = _roundtrip(
+            server,
+            path,
+            {
+                "command": "authorize",
+                "agent_id": "agent-transport",
+                "action_id": "a1",
+                "operation": "read",
+                "resource": "workspace/report.txt",
+                "identity_token": register["identity_token"],
+            },
+        )
+        assert decision["ok"] is True
+        assert decision["decision"] == "allow"
+    finally:
+        server.close()
+
+
+def test_transport_denies_token_from_wrong_peer_pid(tmp_path, monkeypatch):
+    path = tmp_path / "controller.sock"
+
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return tmp_path / agent_id
+
+        def attach_pid(self, cgroup_path, pid):
+            return None
+
+    monkeypatch.setattr(
+        "agent_containment.transport.LinuxCgroupSupervisor.pid_in_cgroup",
+        lambda pid, cgroup_path: True,
+    )
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
+    service.register("agent-transport")
+    service.create_workload("agent-transport")
+    token = service.issue_identity_token("agent-transport", peer_pid=os.getpid() + 1)
+
+    server = UnixControlServer(service, path, allowed_uids={os.getuid()})
+    server.start()
+    try:
+        decision = _roundtrip(
+            server,
+            path,
+            {
+                "command": "authorize",
+                "agent_id": "agent-transport",
+                "action_id": "a1",
+                "operation": "read",
+                "resource": "workspace/report.txt",
+                "identity_token": token,
+            },
+        )
+        assert decision["ok"] is True
+        assert decision["decision"] == "deny"
+        assert "authenticated" in decision["reason"]
+    finally:
+        server.close()
+
+
+def test_transport_denies_token_when_peer_is_outside_workload(tmp_path, monkeypatch):
+    path = tmp_path / "controller.sock"
+
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return tmp_path / agent_id
+
+        def attach_pid(self, cgroup_path, pid):
+            return None
+
+    monkeypatch.setattr(
+        "agent_containment.transport.LinuxCgroupSupervisor.pid_in_cgroup",
+        lambda pid, cgroup_path: False,
+    )
+
+    server = UnixControlServer(
+        ContainmentService(cgroup_supervisor=FakeSupervisor()),
+        path,
+        allowed_uids={os.getuid()},
+        privileged_uids={os.getuid()},
+    )
+    server.start()
+    try:
+        register = _roundtrip(
+            server,
+            path,
+            {
+                "command": "register",
+                "agent_id": "agent-transport",
+                "workload_pid": os.getpid(),
+            },
+        )
+        assert register["ok"] is True
+
+        decision = _roundtrip(
+            server,
+            path,
+            {
+                "command": "authorize",
+                "agent_id": "agent-transport",
+                "action_id": "a1",
+                "operation": "read",
+                "resource": "workspace/report.txt",
+                "identity_token": register["identity_token"],
+            },
+        )
+        assert decision["ok"] is True
+        assert decision["decision"] == "deny"
+        assert "authenticated" in decision["reason"]
+    finally:
+        server.close()
