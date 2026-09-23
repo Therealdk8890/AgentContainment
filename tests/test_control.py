@@ -1,5 +1,6 @@
 from agent_containment.containment import CapabilitySet, ContainmentController
 from agent_containment.control import ContainmentService
+from agent_containment.models import Action, DecisionType
 from agent_containment.runtime import Runtime, RuntimeState
 
 
@@ -33,3 +34,46 @@ def test_duplicate_registration_is_rejected():
         assert "already registered" in str(exc)
     else:
         raise AssertionError("duplicate registration must fail")
+
+
+def test_identity_token_denies_missing_and_wrong_credentials():
+    service = ContainmentService()
+    service.register("agent-1")
+    action = Action("agent-1", "a1", "read", "workspace")
+    assert service.authorize(action).decision is DecisionType.DENY
+    assert service.authorize(action, identity_token="wrong").decision is DecisionType.DENY
+
+
+def test_cgroup_identity_requires_membership():
+    service = ContainmentService()
+    service.register("agent-1")
+    token = service.issue_identity_token("agent-1", cgroup_path="/sys/fs/cgroup/demo")
+
+    action = Action("agent-1", "a1", "read", "workspace")
+    assert service.authorize(
+        action,
+        identity_token=token,
+        peer_pid=123,
+        cgroup_membership=lambda pid, path: False,
+    ).decision is DecisionType.DENY
+
+    assert service.authorize(
+        action,
+        identity_token=token,
+        peer_pid=123,
+        cgroup_membership=lambda pid, path: True,
+    ).decision is DecisionType.ALLOW
+
+
+def test_cgroup_identity_cannot_be_bypassed_by_matching_pid_alone():
+    service = ContainmentService()
+    service.register("agent-1")
+    token = service.issue_identity_token("agent-1", peer_pid=123, cgroup_path="/sys/fs/cgroup/demo")
+
+    action = Action("agent-1", "a1", "read", "workspace")
+    assert service.authorize(
+        action,
+        identity_token=token,
+        peer_pid=123,
+        cgroup_membership=lambda pid, path: False,
+    ).decision is DecisionType.DENY
