@@ -60,3 +60,19 @@ def test_peer_uid_policy_rejects_wrong_uid(tmp_path):
         assert response == {"ok": False, "error": "unauthorized_peer"}
     finally:
         server.close()
+
+def test_peer_uid_can_read_but_cannot_contain_without_privilege(tmp_path):
+    path = tmp_path / "controller.sock"
+    server = UnixControlServer(
+        ContainmentService(),
+        path,
+        allowed_uids={os.getuid()},
+        privileged_uids={os.getuid() + 1},
+    )
+    server.start()
+    try:
+        register = _roundtrip(server, path, {"command": "register", "agent_id": "agent-1"})
+        assert register["ok"] is False
+        assert register["error"] == "forbidden_command"
+    finally:
+        server.close()
