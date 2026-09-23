@@ -24,12 +24,7 @@ class ManagedAgent:
 
 
 class ContainmentService:
-    """Controller-owned registry and containment API.
-
-    Registered agents receive a controller-issued bearer capability. Only its
-    SHA-256 digest is retained by the controller, so an agent_id by itself is
-    not sufficient to authorize actions for that identity.
-    """
+    """Controller-owned registry and containment API."""
 
     def __init__(self, audit: AuditLog | None = None):
         self._agents: dict[str, ManagedAgent] = {}
@@ -38,7 +33,7 @@ class ContainmentService:
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
-                 policy: PolicyEngine | None = None) -> tuple[Runtime, str]:
+                 policy: PolicyEngine | None = None) -> Runtime:
         with self._lock:
             if agent_id in self._agents:
                 raise ValueError(f"agent already registered: {agent_id}")
@@ -55,7 +50,15 @@ class ContainmentService:
             )
             if self.audit:
                 self.audit.record("agent_registered", agent_id=agent_id)
-            return runtime, token
+            return runtime
+
+    def issue_identity_token(self, agent_id: str) -> str:
+        """Rotate and return a fresh bearer capability for an existing agent."""
+        with self._lock:
+            managed = self._managed(agent_id)
+            token = secrets.token_urlsafe(32)
+            managed.identity_digest = self._digest_token(token)
+            return token
 
     def authorize(self, action: Action, *, identity_token: str | None = None) -> Decision:
         managed = self._managed(action.agent_id)
@@ -121,8 +124,7 @@ class ContainmentService:
         return hmac.compare_digest(ContainmentService._digest_token(token), digest)
 
     def _managed(self, agent_id: str) -> ManagedAgent:
-        with self._lock:
-            try:
-                return self._agents[agent_id]
-            except KeyError as exc:
-                raise KeyError(f"unknown agent: {agent_id}") from exc
+        try:
+            return self._agents[agent_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown agent: {agent_id}") from exc
