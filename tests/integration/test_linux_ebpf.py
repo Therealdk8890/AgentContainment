@@ -51,7 +51,11 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         pytest.skip("build eBPF artifacts first")
 
     group = root / f"agent-containment-test-{os.getpid()}"
-    pin_dir = Path(tempfile.mkdtemp(prefix="agent-containment-bpf-"))
+    bpffs = Path("/sys/fs/bpf")
+    if not bpffs.is_dir():
+        pytest.skip("BPF filesystem is unavailable")
+    pin_dir = bpffs / f"agent-containment-test-{os.getpid()}"
+    pin_dir.mkdir()
     marker = pin_dir / "connected"
     blocked = pin_dir / "blocked"
     escaped = pin_dir / "escaped"
