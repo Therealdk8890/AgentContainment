@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from threading import Event
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ class UnixControlServer:
         self.max_message_bytes = max_message_bytes
         self.allowed_uids = allowed_uids
         self._sock: socket.socket | None = None
+        self._stop = Event()
 
     def start(self) -> None:
         if not hasattr(socket, "AF_UNIX"):
@@ -39,12 +41,30 @@ class UnixControlServer:
             self.path.unlink()
         except FileNotFoundError:
             pass
+        self._stop.clear()
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(str(self.path))
         os.chmod(self.path, self.mode)
         self._sock.listen(16)
 
+    def serve_forever(self, *, stop_event: Event | None = None) -> None:
+        """Serve requests until close() or the supplied stop event is set."""
+        if self._sock is None:
+            raise RuntimeError("server is not started")
+        self._sock.settimeout(0.25)
+        event = stop_event or self._stop
+        while not event.is_set():
+            try:
+                self.serve_once()
+            except socket.timeout:
+                continue
+            except OSError:
+                if event.is_set() or self._sock is None:
+                    break
+                raise
+
     def close(self) -> None:
+        self._stop.set()
         if self._sock is not None:
             self._sock.close()
             self._sock = None
