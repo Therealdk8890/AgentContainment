@@ -23,3 +23,9 @@ class UnixControlClient:
         if not isinstance(response, dict):
             raise ValueError("invalid controller response")
         return response
+
+    def authorize(self, agent_id: str, action_id: str, operation: str, resource: str, *, risk: int = 0) -> dict[str, Any]:
+        return self.request(
+            "authorize", agent_id=agent_id, action_id=action_id,
+            operation=operation, resource=resource, risk=risk,
+        )
