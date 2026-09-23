@@ -11,6 +11,8 @@ import pytest
 from agent_containment.containment import ContainmentController
 from agent_containment.control import ContainmentService
 from agent_containment.egress_enforcement import LinuxEbpfEgressEnforcer
+from agent_containment.process import LinuxCgroupProcessContainment
+from agent_containment.runtime import Runtime, RuntimeState
 
 
 pytestmark = pytest.mark.integration
@@ -119,7 +121,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         runtime_service.register(
             "adversarial-agent",
             containment=ContainmentController(
-                __import__("agent_containment.runtime", fromlist=["Runtime"]).Runtime("adversarial-agent"),
+                Runtime("adversarial-agent"),
                 kernel_egress=enforcer,
             ),
         )
@@ -155,6 +157,70 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
             pin_dir.rmdir()
         except OSError:
             pass
+        try:
+            marker_dir.rmdir()
+        except OSError:
+            pass
+
+def test_controller_containment_kills_hostile_cgroup_process():
+    if sys.platform != "linux":
+        pytest.skip("Linux cgroup integration test")
+    if os.geteuid() != 0:
+        pytest.skip("requires root for cgroup operations")
+    if os.environ.get("AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS") != "1":
+        pytest.skip("set AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 to run")
+
+    root = Path("/sys/fs/cgroup")
+    if not (root / "cgroup.controllers").exists():
+        pytest.skip("cgroup v2 is unavailable")
+
+    group = root / f"agent-containment-process-test-{os.getpid()}"
+    marker_dir = Path(tempfile.mkdtemp(prefix="agent-containment-process-"))
+    ready = marker_dir / "ready"
+    heartbeat = marker_dir / "heartbeat"
+    child_code = (
+        "import os,sys,time\n"
+        "group=sys.argv[1]\n"
+        "with open(group + '/cgroup.procs','w') as f: f.write(str(os.getpid()))\n"
+        "open(sys.argv[2],'w').write('ready')\n"
+        "while True:\n"
+        "    open(sys.argv[3],'w').write(str(time.time()))\n"
+        "    time.sleep(0.05)\n"
+    )
+    child = None
+    try:
+        group.mkdir()
+        child = subprocess.Popen(
+            [sys.executable, "-c", child_code, str(group), str(ready), str(heartbeat)]
+        )
+        _wait_for_file(ready)
+        _wait_for_file(heartbeat)
+
+        runtime = Runtime("hostile-agent")
+        containment = ContainmentController(
+            runtime,
+            process_containment=LinuxCgroupProcessContainment(group),
+        )
+        service = ContainmentService()
+        service.register("hostile-agent", containment=containment)
+
+        report = service.contain("hostile-agent")
+
+        assert report.complete
+        assert runtime.state is RuntimeState.CONTAINED
+        assert "processes_contained" in report.stages
+        child.wait(timeout=3)
+        assert child.returncode is not None
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill()
+            child.wait(timeout=3)
+        try:
+            group.rmdir()
+        except OSError:
+            pass
+        for p in (ready, heartbeat):
+            p.unlink(missing_ok=True)
         try:
             marker_dir.rmdir()
         except OSError:
