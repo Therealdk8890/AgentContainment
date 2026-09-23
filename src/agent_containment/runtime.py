@@ -1,5 +1,13 @@
 from dataclasses import dataclass
+from enum import Enum
 from threading import RLock
+
+
+class RuntimeState(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    HALTED = "halted"
+    CONTAINED = "contained"
 
 
 @dataclass(frozen=True)
@@ -50,12 +58,3 @@ class Runtime:
     def can_execute(self) -> bool:
         with self._lock:
             return self.state is RuntimeState.ACTIVE
-
-
-from enum import Enum
-
-class RuntimeState(str, Enum):
-    ACTIVE = "active"
-    PAUSED = "paused"
-    HALTED = "halted"
-    CONTAINED = "contained"
