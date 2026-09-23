@@ -116,7 +116,7 @@ class UnixControlServer:
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
             runtime = self.service.register(agent_id, metadata=self._metadata(request))
-            token = self.service.issue_identity_token(agent_id, peer_pid=peer_pid)
+            token = self.service.issue_identity_token(agent_id)
             return {"ok": True, "agent_id": agent_id, "state": runtime.state.value,
                     "identity_token": token}
 
