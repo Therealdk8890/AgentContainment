@@ -6,6 +6,7 @@ import hmac
 import secrets
 from dataclasses import dataclass, field
 from threading import RLock
+from typing import Callable
 
 from .audit import AuditLog
 from .containment import ContainmentController, ContainmentReport
@@ -22,15 +23,11 @@ class ManagedAgent:
     policy: PolicyEngine = field(default_factory=PolicyEngine)
     identity_digest: str | None = None
     identity_pid: int | None = None
+    identity_cgroup: str | None = None
 
 
 class ContainmentService:
-    """Controller-owned registry and containment API.
-
-    A Unix transport can bind an agent's bearer capability to the peer PID that
-    received it. The PID binding is an additional local-control-plane check;
-    OS cgroup identity remains the stronger production boundary.
-    """
+    """Controller-owned registry and containment API."""
 
     def __init__(self, audit: AuditLog | None = None):
         self._agents: dict[str, ManagedAgent] = {}
@@ -43,7 +40,9 @@ class ContainmentService:
         with self._lock:
             if agent_id in self._agents:
                 raise ValueError(f"agent already registered: {agent_id}")
-            runtime = containment.runtime if containment is not None else Runtime(agent_id)
+            runtime = containment.runtime if containment is not None else __import__(
+                "agent_containment.runtime", fromlist=["Runtime"]
+            ).Runtime(agent_id)
             if runtime.agent_id != agent_id:
                 raise ValueError("containment runtime agent_id does not match registration")
             self._agents[agent_id] = ManagedAgent(
@@ -56,15 +55,24 @@ class ContainmentService:
                 self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
 
-    def issue_identity_token(self, agent_id: str, *, peer_pid: int | None = None) -> str:
-        """Issue a fresh bearer capability and optionally bind it to a peer PID."""
+    def issue_identity_token(
+        self,
+        agent_id: str,
+        *,
+        peer_pid: int | None = None,
+        cgroup_path: str | None = None,
+    ) -> str:
+        """Issue a token bound to the registering workload identity."""
         if peer_pid is not None and peer_pid <= 0:
             raise ValueError("peer_pid must be positive")
+        if cgroup_path is not None and not cgroup_path:
+            raise ValueError("cgroup_path must be non-empty")
         with self._lock:
             managed = self._managed(agent_id)
             token = secrets.token_urlsafe(32)
             managed.identity_digest = self._digest_token(token)
             managed.identity_pid = peer_pid
+            managed.identity_cgroup = cgroup_path
             return token
 
     def authorize(
@@ -73,6 +81,7 @@ class ContainmentService:
         *,
         identity_token: str | None = None,
         peer_pid: int | None = None,
+        cgroup_membership: Callable[[int, str], bool] | None = None,
     ) -> Decision:
         managed = self._managed(action.agent_id)
         authenticated = (
@@ -80,9 +89,14 @@ class ContainmentService:
             or (
                 bool(identity_token)
                 and self._token_matches(identity_token, managed.identity_digest)
+                and (managed.identity_pid is None or peer_pid == managed.identity_pid)
                 and (
-                    managed.identity_pid is None
-                    or peer_pid == managed.identity_pid
+                    managed.identity_cgroup is None
+                    or (
+                        peer_pid is not None
+                        and cgroup_membership is not None
+                        and cgroup_membership(peer_pid, managed.identity_cgroup)
+                    )
                 )
             )
         )
@@ -143,7 +157,8 @@ class ContainmentService:
         return hmac.compare_digest(ContainmentService._digest_token(token), digest)
 
     def _managed(self, agent_id: str) -> ManagedAgent:
-        try:
-            return self._agents[agent_id]
-        except KeyError as exc:
-            raise KeyError(f"unknown agent: {agent_id}") from exc
+        with self._lock:
+            try:
+                return self._agents[agent_id]
+            except KeyError as exc:
+                raise KeyError(f"unknown agent: {agent_id}") from exc
