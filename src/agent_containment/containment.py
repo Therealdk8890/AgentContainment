@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from .runtime import Runtime
+from .runtime import Runtime, RuntimeState
 
 @dataclass
 class CapabilitySet:
