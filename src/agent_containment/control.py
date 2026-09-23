@@ -21,10 +21,16 @@ class ManagedAgent:
     metadata: dict[str, str] = field(default_factory=dict)
     policy: PolicyEngine = field(default_factory=PolicyEngine)
     identity_digest: str | None = None
+    identity_pid: int | None = None
 
 
 class ContainmentService:
-    """Controller-owned registry and containment API."""
+    """Controller-owned registry and containment API.
+
+    A Unix transport can bind an agent's bearer capability to the peer PID that
+    received it. The PID binding is an additional local-control-plane check;
+    OS cgroup identity remains the stronger production boundary.
+    """
 
     def __init__(self, audit: AuditLog | None = None):
         self._agents: dict[str, ManagedAgent] = {}
@@ -40,35 +46,48 @@ class ContainmentService:
             runtime = containment.runtime if containment is not None else Runtime(agent_id)
             if runtime.agent_id != agent_id:
                 raise ValueError("containment runtime agent_id does not match registration")
-            token = secrets.token_urlsafe(32)
             self._agents[agent_id] = ManagedAgent(
                 runtime=runtime,
                 containment=containment or ContainmentController(runtime),
                 metadata=dict(metadata or {}),
                 policy=policy or PolicyEngine(),
-                identity_digest=self._digest_token(token),
             )
             if self.audit:
                 self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
 
-    def issue_identity_token(self, agent_id: str) -> str:
-        """Rotate and return a fresh bearer capability for an existing agent."""
+    def issue_identity_token(self, agent_id: str, *, peer_pid: int | None = None) -> str:
+        """Issue a fresh bearer capability and optionally bind it to a peer PID."""
+        if peer_pid is not None and peer_pid <= 0:
+            raise ValueError("peer_pid must be positive")
         with self._lock:
             managed = self._managed(agent_id)
             token = secrets.token_urlsafe(32)
             managed.identity_digest = self._digest_token(token)
+            managed.identity_pid = peer_pid
             return token
 
-    def authorize(self, action: Action, *, identity_token: str | None = None) -> Decision:
+    def authorize(
+        self,
+        action: Action,
+        *,
+        identity_token: str | None = None,
+        peer_pid: int | None = None,
+    ) -> Decision:
         managed = self._managed(action.agent_id)
-        if managed.identity_digest is not None:
-            if not identity_token or not self._token_matches(identity_token, managed.identity_digest):
-                decision = Decision(action.action_id, DecisionType.DENY, "agent identity is not authenticated")
-            elif not managed.runtime.can_execute:
-                decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
-            else:
-                decision = managed.policy.evaluate(action)
+        authenticated = (
+            managed.identity_digest is None
+            or (
+                bool(identity_token)
+                and self._token_matches(identity_token, managed.identity_digest)
+                and (
+                    managed.identity_pid is None
+                    or peer_pid == managed.identity_pid
+                )
+            )
+        )
+        if not authenticated:
+            decision = Decision(action.action_id, DecisionType.DENY, "agent identity is not authenticated")
         elif not managed.runtime.can_execute:
             decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
         else:
