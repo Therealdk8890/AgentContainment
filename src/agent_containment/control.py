@@ -1,11 +1,9 @@
-"""Controller-owned service facade for AgentContainment.
-
-The service owns containment authority and keeps agent-facing code separate from
-the control plane. It is transport-agnostic so a local or remote adapter can
-expose it without moving authority into the agent process.
-"""
+"""Controller-owned service facade for AgentContainment."""
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from dataclasses import dataclass, field
 from threading import RLock
 
@@ -22,10 +20,16 @@ class ManagedAgent:
     containment: ContainmentController
     metadata: dict[str, str] = field(default_factory=dict)
     policy: PolicyEngine = field(default_factory=PolicyEngine)
+    identity_digest: str | None = None
 
 
 class ContainmentService:
-    """Controller-owned registry and containment API."""
+    """Controller-owned registry and containment API.
+
+    Registered agents receive a controller-issued bearer capability. Only its
+    SHA-256 digest is retained by the controller, so an agent_id by itself is
+    not sufficient to authorize actions for that identity.
+    """
 
     def __init__(self, audit: AuditLog | None = None):
         self._agents: dict[str, ManagedAgent] = {}
@@ -34,31 +38,41 @@ class ContainmentService:
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
-                 policy: PolicyEngine | None = None) -> Runtime:
+                 policy: PolicyEngine | None = None) -> tuple[Runtime, str]:
         with self._lock:
             if agent_id in self._agents:
                 raise ValueError(f"agent already registered: {agent_id}")
             runtime = containment.runtime if containment is not None else Runtime(agent_id)
             if runtime.agent_id != agent_id:
                 raise ValueError("containment runtime agent_id does not match registration")
+            token = secrets.token_urlsafe(32)
             self._agents[agent_id] = ManagedAgent(
                 runtime=runtime,
                 containment=containment or ContainmentController(runtime),
                 metadata=dict(metadata or {}),
                 policy=policy or PolicyEngine(),
+                identity_digest=self._digest_token(token),
             )
             if self.audit:
                 self.audit.record("agent_registered", agent_id=agent_id)
-            return runtime
+            return runtime, token
 
-    def authorize(self, action: Action) -> Decision:
+    def authorize(self, action: Action, *, identity_token: str | None = None) -> Decision:
         managed = self._managed(action.agent_id)
-        if not managed.runtime.can_execute:
+        if managed.identity_digest is not None:
+            if not identity_token or not self._token_matches(identity_token, managed.identity_digest):
+                decision = Decision(action.action_id, DecisionType.DENY, "agent identity is not authenticated")
+            elif not managed.runtime.can_execute:
+                decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
+            else:
+                decision = managed.policy.evaluate(action)
+        elif not managed.runtime.can_execute:
             decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
         else:
             decision = managed.policy.evaluate(action)
-            if decision.decision is DecisionType.HALT:
-                managed.containment.halt()
+
+        if decision.decision is DecisionType.HALT:
+            managed.containment.halt()
         if self.audit:
             self.audit.record(
                 "authorization_decision",
@@ -97,6 +111,14 @@ class ContainmentService:
     def snapshot(self) -> dict[str, RuntimeState]:
         with self._lock:
             return {agent_id: item.runtime.state for agent_id, item in self._agents.items()}
+
+    @staticmethod
+    def _digest_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _token_matches(token: str, digest: str) -> bool:
+        return hmac.compare_digest(ContainmentService._digest_token(token), digest)
 
     def _managed(self, agent_id: str) -> ManagedAgent:
         with self._lock:
