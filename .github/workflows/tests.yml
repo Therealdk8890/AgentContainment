@@ -13,9 +13,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: pip install -e .
       - run: pip install pytest
-      - run: pytest -q
+      - run: PYTHONPATH=src pytest -q
   ebpf-build:
     runs-on: ubuntu-latest
     steps:
@@ -38,7 +37,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
       - name: Build eBPF containment controller
         run: bash scripts/build_ebpf.sh
-      - name: Install Python package and test dependencies
-        run: python -m pip install -e . pytest
+      - name: Install Python test dependencies
+        run: python -m pip install pytest
       - name: Run privileged eBPF adversarial test
-        run: sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PATH="$PATH" pytest -q tests/integration/test_linux_ebpf.py
+        run: sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH" pytest -q tests/integration/test_linux_ebpf.py
