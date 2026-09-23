@@ -101,21 +101,19 @@ class UnixControlServer:
                 return
             try:
                 request = json.loads(line)
-                if isinstance(request, dict):
-                    request["_peer_uid"] = self._peer_uid(conn)
-                response = self.handle(request)
+                response = self.handle(request, peer_uid=self._peer_uid(conn))
             except (json.JSONDecodeError, ControlProtocolError, KeyError, ValueError) as exc:
                 response = {"ok": False, "error": str(exc)}
             except Exception:
                 response = {"ok": False, "error": "internal_error"}
             self._send(conn, response)
 
-    def handle(self, request: Any) -> dict[str, Any]:
+    def handle(self, request: Any, *, peer_uid: int | None = None) -> dict[str, Any]:
         if not isinstance(request, dict):
             raise ControlProtocolError("request must be an object")
         command = request.get("command")
         if command == "register":
-            self._require_privileged(request)
+            self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
             runtime = self.service.register(
                 agent_id, metadata=self._metadata(request)
@@ -172,8 +170,7 @@ class UnixControlServer:
             raise ControlProtocolError("metadata must be a string-to-string object")
         return metadata
 
-    def _require_privileged(self, request: dict[str, Any]) -> None:
-        uid = request.pop("_peer_uid", None)
+    def _require_privileged(self, uid: int | None) -> None
         if self.privileged_uids is not None:
             allowed = self.privileged_uids
         elif self.allowed_uids is not None:
