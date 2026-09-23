@@ -40,8 +40,17 @@ class UnixControlClient:
             raise RuntimeError("invalid control daemon response")
         return result
 
-    def register(self, agent_id: str, metadata: dict[str, str] | None = None) -> dict[str, Any]:
-        result = self.request("register", agent_id=agent_id, metadata=metadata or {})
+    def register(
+        self,
+        agent_id: str,
+        metadata: dict[str, str] | None = None,
+        *,
+        workload_pid: int | None = None,
+    ) -> dict[str, Any]:
+        fields: dict[str, Any] = {"agent_id": agent_id, "metadata": metadata or {}}
+        if workload_pid is not None:
+            fields["workload_pid"] = workload_pid
+        result = self.request("register", **fields)
         if result.get("ok") and isinstance(result.get("identity_token"), str):
             self.identity_token = result["identity_token"]
         return result
