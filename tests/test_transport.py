@@ -21,10 +21,19 @@ def _roundtrip(server, path, payload):
 
 def test_protocol_register_status_and_contain(tmp_path):
     path = tmp_path / "controller.sock"
-    server = UnixControlServer(ContainmentService(), path, allowed_uids={os.getuid()}, privileged_uids={os.getuid()})
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return tmp_path / agent_id
+        def attach_pid(self, path, pid):
+            return None
+
+    server = UnixControlServer(ContainmentService(cgroup_supervisor=FakeSupervisor()), path, allowed_uids={os.getuid()}, privileged_uids={os.getuid()})
     server.start()
     try:
-        assert _roundtrip(server, path, {"command": "register", "agent_id": "agent-1"})["state"] == "active"
+        register = _roundtrip(server, path, {"command": "register", "agent_id": "agent-1"})
+        assert register["state"] == "active"
+        assert register["identity_token"] is None
+        assert register["cgroup_path"].endswith("/agent-1")
         assert _roundtrip(server, path, {"command": "status", "agent_id": "agent-1"})["state"] == "active"
         result = _roundtrip(server, path, {"command": "contain", "agent_id": "agent-1"})
         assert result["state"] == "contained"
