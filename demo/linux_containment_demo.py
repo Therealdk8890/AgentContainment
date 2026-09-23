@@ -24,7 +24,6 @@ from agent_containment.linux_supervisor import LinuxCgroupSupervisor
 from agent_containment.models import Action
 from agent_containment.policy import PolicyEngine, SequenceRule
 from agent_containment.process import LinuxCgroupProcessContainment
-from agent_containment.runtime import Runtime
 
 
 def wait_for(path: Path, timeout: float = 5.0) -> None:
@@ -52,13 +51,13 @@ def main() -> int:
         print("ERROR: build eBPF artifacts first with scripts/build_ebpf.sh")
         return 2
 
-    group = cgroup_root / f"agent-containment-demo-{os.getpid()}"
     pin_dir = Path("/sys/fs/bpf") / f"agent-containment-demo-{os.getpid()}"
     work = Path(tempfile.mkdtemp(prefix="agent-containment-demo-"))
     ready = work / "ready"
     connected = work / "connected"
     blocked = work / "blocked"
     escaped = work / "escaped"
+    start = work / "start"
     audit_path = work / "audit.jsonl"
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -70,8 +69,9 @@ def main() -> int:
 
     child_code = (
         "import socket,sys,time\n"
-        "group,host,port,ready,connected,go,blocked,escaped=sys.argv[1:]\n"
+        "group,host,port,ready,connected,start,go,blocked,escaped=sys.argv[1:]\n"
         "open(ready,'w').write('ready')\n"
+        "while not __import__('os').path.exists(start + '.release'): time.sleep(.02)\n"
         "s=socket.create_connection((host,int(port)),timeout=2)\n"
         "s.sendall(b'pre-containment')\n"
         "open(connected,'w').write('connected')\n"
@@ -90,29 +90,39 @@ def main() -> int:
 
     child = None
     try:
-        group.mkdir()
-        pin_dir.mkdir()
-
         child = subprocess.Popen(
             [
                 sys.executable, "-c", child_code,
-                str(group), host, str(port), str(ready), str(connected),
-                str(work / "release"), str(blocked), str(escaped),
+                "controller-assigned", host, str(port), str(ready), str(connected),
+                str(start), str(work / "release"), str(blocked), str(escaped),
             ],
         )
 
-        # The controller, not the child, establishes workload membership.
+        # The controller creates the workload boundary and attaches the child
+        # before the child is allowed to make its first network connection.
+        agent_id = f"adversarial-agent-{child.pid}"
         supervisor = LinuxCgroupSupervisor(cgroup_root)
-        supervisor.attach_pid(group, child.pid)
-        wait_for(ready)
-        wait_for(connected)
-
-        conn, _ = server.accept()
-        assert conn.recv(64) == b"pre-containment"
-        conn.close()
-
-        runtime = Runtime("adversarial-agent")
         audit = AuditLog(audit_path)
+        policy = PolicyEngine(
+            sequence_rules=[
+                SequenceRule(
+                    "download-upload-delete",
+                    ("download_file", "upload_file", "delete_file"),
+                )
+            ]
+        )
+        service = ContainmentService(audit, cgroup_supervisor=supervisor)
+        service.register(
+            agent_id,
+            metadata={"demo": "linux-adversarial"},
+            policy=policy,
+        )
+        group = Path(service.create_workload(agent_id))
+        service.attach_workload(agent_id, child.pid)
+        pin_dir = Path("/sys/fs/bpf") / f"agent-containment-demo-{child.pid}"
+        pin_dir.mkdir()
+
+        runtime = service._managed(agent_id).runtime
         egress = LinuxEbpfEgressEnforcer(
             str(controller_bin), str(bpf_object), str(group), str(pin_dir)
         )
@@ -124,16 +134,15 @@ def main() -> int:
             # boundary blocks it before the process is killed.
             kernel_egress=egress,
         )
-        policy = PolicyEngine(
-            sequence_rules=[
-                SequenceRule(
-                    "download-upload-delete",
-                    ("download_file", "upload_file", "delete_file"),
-                )
-            ]
-        )
-        service = ContainmentService(audit)
-        service.register("adversarial-agent", containment=containment, policy=policy)
+        service._managed(agent_id).containment = containment
+
+        wait_for(ready)
+        start.with_name(start.name + ".release").write_text("go")
+        wait_for(connected)
+
+        conn, _ = server.accept()
+        assert conn.recv(64) == b"pre-containment"
+        conn.close()
 
         print("AGENTCONTAINMENT LINUX ADVERSARIAL DEMO")
         print("=" * 44)
@@ -143,17 +152,17 @@ def main() -> int:
             ("a3", "delete_file", "workspace/report.txt"),
         ):
             decision = service.authorize(
-                Action("adversarial-agent", action_id, operation, resource, risk=10)
+                Action(agent_id, action_id, operation, resource, risk=10)
             )
             print(f"[{action_id}] {operation:<18} {decision.decision.value.upper()}")
             if decision.decision.value == "halt":
                 print(f"      {decision.reason}")
                 break
 
-        report = service.contain("adversarial-agent")
+        report = service.contain(agent_id)
         print("\n--- CONTAINMENT ---")
-        print(f"Runtime:       {runtime.state.value.upper()}")
-        print(f"Epoch:         {runtime.epoch}")
+        print(f"Runtime:       {service.status(agent_id).value.upper()}")
+        print(f"Epoch:         {report.epoch}")
         print(f"Capabilities:  {sorted(containment.capabilities.capabilities)}")
         print(f"Egress:        {'BLOCKED' if 'kernel_egress_contained' in report.stages else 'FAILED'}")
 
@@ -190,22 +199,24 @@ def main() -> int:
             child.kill()
             child.wait(timeout=3)
         subprocess.run(
-            [str(controller_bin), "detach", str(pin_dir)],
+            [str(controller_bin), "detach", str(pin_dir)] if pin_dir is not None else ["/bin/true"],
             check=False,
             capture_output=True,
             text=True,
         )
-        try:
-            group.rmdir()
-        except OSError:
-            pass
+        if group is not None:
+            try:
+                group.rmdir()
+            except OSError:
+                pass
         server.close()
-        for path in (ready, connected, blocked, escaped, audit_path, work / "release", work / "release.release"):
+        for path in (ready, connected, blocked, escaped, audit_path, start, work / "release", work / "release.release", start.with_name(start.name + ".release")):
             path.unlink(missing_ok=True)
-        try:
-            pin_dir.rmdir()
-        except OSError:
-            pass
+        if pin_dir is not None:
+            try:
+                pin_dir.rmdir()
+            except OSError:
+                pass
         try:
             work.rmdir()
         except OSError:
