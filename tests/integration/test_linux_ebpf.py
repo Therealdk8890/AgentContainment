@@ -48,6 +48,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     payload = pin_dir / "payload"
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
     server.listen(4)
