@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from threading import RLock
 
 from .containment import ContainmentController, ContainmentReport
+from .models import Action, Decision, DecisionType
+from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
 
 
@@ -18,6 +20,7 @@ class ManagedAgent:
     runtime: Runtime
     containment: ContainmentController
     metadata: dict[str, str] = field(default_factory=dict)
+    policy: PolicyEngine = field(default_factory=PolicyEngine)
 
 
 class ContainmentService:
@@ -28,7 +31,8 @@ class ContainmentService:
         self._lock = RLock()
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
-                 metadata: dict[str, str] | None = None) -> Runtime:
+                 metadata: dict[str, str] | None = None,
+                 policy: PolicyEngine | None = None) -> Runtime:
         with self._lock:
             if agent_id in self._agents:
                 raise ValueError(f"agent already registered: {agent_id}")
@@ -39,8 +43,18 @@ class ContainmentService:
                 runtime=runtime,
                 containment=containment or ContainmentController(runtime),
                 metadata=dict(metadata or {}),
+                policy=policy or PolicyEngine(),
             )
             return runtime
+
+    def authorize(self, action: Action) -> Decision:
+        managed = self._managed(action.agent_id)
+        if not managed.runtime.can_execute:
+            return Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
+        decision = managed.policy.evaluate(action)
+        if decision.decision is DecisionType.HALT:
+            managed.containment.halt()
+        return decision
 
     def unregister(self, agent_id: str) -> None:
         with self._lock:
