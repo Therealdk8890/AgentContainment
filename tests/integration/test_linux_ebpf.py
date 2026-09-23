@@ -64,7 +64,6 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     child = None
     try:
         group.mkdir()
-        (group / "cgroup.procs").write_text(str(os.getpid()))
         child = subprocess.Popen([sys.executable, "-c", child_code, host, str(port), str(marker)])
         (group / "cgroup.procs").write_text(str(child.pid))
         _wait_for_file(marker)
