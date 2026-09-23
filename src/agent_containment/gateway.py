@@ -1,6 +1,8 @@
 from .containment import ContainmentController
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
+from .runtime import ExecutionLease
+
 
 class ActionGateway:
     """The enforcement point between an agent and its tools."""
@@ -19,6 +21,36 @@ class ActionGateway:
         if decision.decision is DecisionType.HALT:
             self.containment.halt()
         return decision
+
+    def acquire_lease(self) -> ExecutionLease | None:
+        return self.containment.runtime.acquire_lease()
+
+    def execute_with_lease(self, action: Action, lease: ExecutionLease, executor):
+        if not self.containment.runtime.lease_valid(lease):
+            decision = Decision(
+                action.action_id,
+                DecisionType.DENY,
+                "execution lease invalidated by runtime state change",
+            )
+            self.history.append(decision)
+            return decision
+
+        decision = self.authorize(action)
+        if decision.decision is not DecisionType.ALLOW:
+            return decision
+
+        # Re-check immediately before the side effect. Containment can race
+        # with authorization, so a stale lease must never authorize execution.
+        if not self.containment.runtime.lease_valid(lease):
+            decision = Decision(
+                action.action_id,
+                DecisionType.DENY,
+                "execution lease invalidated before side effect",
+            )
+            self.history.append(decision)
+            return decision
+
+        return executor(action)
 
     def execute(self, action: Action, executor):
         decision = self.authorize(action)
