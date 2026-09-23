@@ -55,10 +55,11 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     if not bpffs.is_dir():
         pytest.skip("BPF filesystem is unavailable")
     pin_dir = bpffs / f"agent-containment-test-{os.getpid()}"
+    marker_dir = Path(tempfile.mkdtemp(prefix="agent-containment-test-"))
     pin_dir.mkdir()
-    marker = pin_dir / "connected"
-    blocked = pin_dir / "blocked"
-    escaped = pin_dir / "escaped"
+    marker = marker_dir / "connected"
+    blocked = marker_dir / "blocked"
+    escaped = marker_dir / "escaped"
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -90,7 +91,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     child = None
     try:
         group.mkdir()
-        ready = pin_dir / "ready"
+        ready = marker_dir / "ready"
         child = subprocess.Popen(
             [
                 sys.executable, "-c", child_code, str(group), host, str(port),
@@ -131,9 +132,13 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         except OSError:
             pass
         server.close()
-        for p in (marker, blocked, escaped, pin_dir / "ready"):
+        for p in (marker, blocked, escaped, marker_dir / "ready"):
             p.unlink(missing_ok=True)
         try:
             pin_dir.rmdir()
+        except OSError:
+            pass
+        try:
+            marker_dir.rmdir()
         except OSError:
             pass
