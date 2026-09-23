@@ -5,11 +5,12 @@ import json
 import os
 import socket
 import struct
-from threading import Event
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from .control import ContainmentService
+from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action
 
 
@@ -115,10 +116,19 @@ class UnixControlServer:
         if command == "register":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
+            cgroup_path = self._optional_cgroup(request)
             runtime = self.service.register(agent_id, metadata=self._metadata(request))
-            token = self.service.issue_identity_token(agent_id)
-            return {"ok": True, "agent_id": agent_id, "state": runtime.state.value,
-                    "identity_token": token}
+            token = self.service.issue_identity_token(
+                agent_id,
+                cgroup_path=cgroup_path,
+            )
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "state": runtime.state.value,
+                "identity_token": token,
+                "cgroup_path": cgroup_path,
+            }
 
         if command == "status":
             agent_id = self._agent_id(request)
@@ -142,10 +152,14 @@ class UnixControlServer:
                 raise ControlProtocolError("resource must be a non-empty string of at most 4096 characters")
             if not isinstance(risk, int) or isinstance(risk, bool) or not 0 <= risk <= 100:
                 raise ControlProtocolError("risk must be an integer from 0 to 100")
+            membership = None
+            if self._registered_cgroup(agent_id) is not None:
+                membership = LinuxCgroupSupervisor.pid_in_cgroup
             decision = self.service.authorize(
                 Action(agent_id, action_id, operation, resource, risk=risk),
                 identity_token=identity_token,
                 peer_pid=peer_pid,
+                cgroup_membership=membership,
             )
             return {"ok": True, "agent_id": agent_id, "action_id": action_id,
                     "decision": decision.decision.value, "reason": decision.reason,
@@ -182,6 +196,21 @@ class UnixControlServer:
         if not isinstance(agent_id, str) or not agent_id or len(agent_id) > 256:
             raise ControlProtocolError("agent_id must be a non-empty string of at most 256 characters")
         return agent_id
+
+    @staticmethod
+    def _optional_cgroup(request: dict[str, Any]) -> str | None:
+        value = request.get("cgroup_path")
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise ControlProtocolError("cgroup_path must be a non-empty string of at most 4096 characters")
+        path = Path(value)
+        if not path.is_absolute() or not path.is_dir():
+            raise ControlProtocolError("cgroup_path must be an existing absolute directory")
+        return str(path.resolve())
+
+    def _registered_cgroup(self, agent_id: str) -> str | None:
+        return self.service._agents[agent_id].identity_cgroup
 
     @staticmethod
     def _metadata(request: dict[str, Any]) -> dict[str, str]:
