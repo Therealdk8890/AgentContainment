@@ -1,9 +1,9 @@
 """End-to-end Linux containment demonstration.
 
-SAFE DEMO: the child only connects to a localhost test server and writes
+SAFE DEMO: the child only connects to a localhost test server and creates
 temporary marker files. No real infrastructure is contacted.
 
-Run as root on Linux with cgroup v2 and after building the eBPF artifacts:
+Run as root on Linux after building the eBPF artifacts:
     sudo python demo/linux_containment_demo.py
 """
 from __future__ import annotations
@@ -18,11 +18,12 @@ from pathlib import Path
 
 from agent_containment.audit import AuditLog
 from agent_containment.containment import CapabilitySet, ContainmentController
+from agent_containment.control import ContainmentService
 from agent_containment.egress_enforcement import LinuxEbpfEgressEnforcer
+from agent_containment.linux_supervisor import LinuxCgroupSupervisor
+from agent_containment.models import Action
 from agent_containment.policy import PolicyEngine, SequenceRule
 from agent_containment.process import LinuxCgroupProcessContainment
-from agent_containment.control import ContainmentService
-from agent_containment.models import Action
 from agent_containment.runtime import Runtime
 
 
@@ -48,7 +49,7 @@ def main() -> int:
     controller_bin = Path("build/agent_containment_ebpf_ctl")
     bpf_object = Path("build/agent_containment_egress.bpf.o")
     if not controller_bin.is_file() or not bpf_object.is_file():
-        print("ERROR: build the eBPF artifacts first with scripts/build_ebpf.sh")
+        print("ERROR: build eBPF artifacts first with scripts/build_ebpf.sh")
         return 2
 
     group = cgroup_root / f"agent-containment-demo-{os.getpid()}"
@@ -64,26 +65,26 @@ def main() -> int:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
     server.listen(4)
-    server.settimeout(0.5)
+    server.settimeout(2.0)
     host, port = server.getsockname()
 
     child_code = (
-        "import os,socket,sys,time\n"
-        "group,host,port,ready,connected,blocked,escaped=sys.argv[1:]\n"
-        "with open(group + '/cgroup.procs','w') as f: f.write(str(os.getpid()))\n"
+        "import socket,sys,time\n"
+        "group,host,port,ready,connected,go,blocked,escaped=sys.argv[1:]\n"
         "open(ready,'w').write('ready')\n"
         "s=socket.create_connection((host,int(port)),timeout=2)\n"
         "s.sendall(b'pre-containment')\n"
         "open(connected,'w').write('connected')\n"
         "s.close()\n"
-        "if sys.stdin.readline().strip() != 'go': sys.exit(3)\n"
+        "open(go,'w').write('waiting')\n"
+        "while not __import__('os').path.exists(go + '.release'): time.sleep(.02)\n"
         "try:\n"
-        "    s=socket.create_connection((host,int(port)),timeout=1)\n"
-        "    s.sendall(b'post-containment')\n"
-        "    open(escaped,'w').write('escaped')\n"
-        "    s.close()\n"
+        "  s=socket.create_connection((host,int(port)),timeout=1)\n"
+        "  s.sendall(b'post-containment')\n"
+        "  open(escaped,'w').write('escaped')\n"
+        "  s.close()\n"
         "except OSError:\n"
-        "    open(blocked,'w').write('blocked')\n"
+        "  open(blocked,'w').write('blocked')\n"
         "time.sleep(10)\n"
     )
 
@@ -94,12 +95,15 @@ def main() -> int:
 
         child = subprocess.Popen(
             [
-                sys.executable, "-c", child_code, str(group), host, str(port),
-                str(ready), str(connected), str(blocked), str(escaped),
+                sys.executable, "-c", child_code,
+                str(group), host, str(port), str(ready), str(connected),
+                str(work / "release"), str(blocked), str(escaped),
             ],
-            stdin=subprocess.PIPE,
-            text=True,
         )
+
+        # The controller, not the child, establishes workload membership.
+        supervisor = LinuxCgroupSupervisor(cgroup_root)
+        supervisor.attach_pid(group, child.pid)
         wait_for(ready)
         wait_for(connected)
 
@@ -109,14 +113,6 @@ def main() -> int:
 
         runtime = Runtime("adversarial-agent")
         audit = AuditLog(audit_path)
-        policy = PolicyEngine(
-            sequence_rules=[
-                SequenceRule(
-                    "download-upload-delete",
-                    ("download_file", "upload_file", "delete_file"),
-                )
-            ]
-        )
         egress = LinuxEbpfEgressEnforcer(
             str(controller_bin), str(bpf_object), str(group), str(pin_dir)
         )
@@ -126,12 +122,16 @@ def main() -> int:
             process_containment=LinuxCgroupProcessContainment(group),
             kernel_egress=egress,
         )
-        service = ContainmentService(audit)
-        service.register(
-            "adversarial-agent",
-            containment=containment,
-            policy=policy,
+        policy = PolicyEngine(
+            sequence_rules=[
+                SequenceRule(
+                    "download-upload-delete",
+                    ("download_file", "upload_file", "delete_file"),
+                )
+            ]
         )
+        service = ContainmentService(audit)
+        service.register("adversarial-agent", containment=containment, policy=policy)
 
         print("AGENTCONTAINMENT LINUX ADVERSARIAL DEMO")
         print("=" * 44)
@@ -146,8 +146,6 @@ def main() -> int:
             print(f"[{action_id}] {operation:<18} {decision.decision.value.upper()}")
             if decision.decision.value == "halt":
                 print(f"      {decision.reason}")
-                print("\n[!] Rogue sequence detected")
-                print("[!] Initiating OS-level containment")
                 break
 
         report = service.contain("adversarial-agent")
@@ -155,27 +153,35 @@ def main() -> int:
         print(f"Runtime:       {runtime.state.value.upper()}")
         print(f"Epoch:         {runtime.epoch}")
         print(f"Capabilities:  {sorted(containment.capabilities.capabilities)}")
-        print(f"Process:       {'CONTAINED' if 'processes_contained' in report.stages else 'FAILED'}")
         print(f"Egress:        {'BLOCKED' if 'kernel_egress_contained' in report.stages else 'FAILED'}")
 
-        assert child.stdin is not None
-        child.stdin.write("go\n")
-        child.stdin.flush()
-
-        wait_for(blocked)
+        # Release the child so it attempts one post-containment connection.
+        release = work / "release"
+        release.with_name(release.name + ".release").write_text("go")
+        wait_for(blocked, timeout=3.0)
         assert not escaped.exists()
+        print("Post-containment egress: BLOCKED")
 
+        # Now exercise the process kill boundary explicitly.
+        supervisor.contain(group)
         child.wait(timeout=3)
+        print("Process containment: KILLED")
+
         valid, message = audit.verify()
         print(f"Audit:         {'VALID' if valid else 'INVALID'}")
         print(f"Audit detail:  {message}")
 
-        if not report.complete or child.returncode is None or not valid:
-            print("\nATTACK RESULT: CONTAINMENT INCOMPLETE")
-            return 1
-
-        print("\nATTACK RESULT: CONTAINED")
-        return 0
+        success = (
+            report.complete
+            and "runtime_fenced" in report.stages
+            and "capabilities_revoked" in report.stages
+            and "kernel_egress_contained" in report.stages
+            and child.returncode is not None
+            and not escaped.exists()
+            and valid
+        )
+        print(f"\nATTACK RESULT: {'CONTAINED' if success else 'INCOMPLETE'}")
+        return 0 if success else 1
     finally:
         if child is not None and child.poll() is None:
             child.kill()
@@ -191,7 +197,7 @@ def main() -> int:
         except OSError:
             pass
         server.close()
-        for path in (ready, connected, blocked, escaped, audit_path):
+        for path in (ready, connected, blocked, escaped, audit_path, work / "release", work / "release.release"):
             path.unlink(missing_ok=True)
         try:
             pin_dir.rmdir()
