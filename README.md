@@ -12,7 +12,7 @@ The containment plane is designed to sit **outside the agent's trust boundary**.
 
 ## Status
 
-Early research/prototype. The current implementation focuses on deterministic action interception, policy decisions, runtime state, containment, blast-radius tracking, and incident records.
+Early research/prototype. The current implementation focuses on deterministic action interception, policy decisions, runtime state, containment, child-agent propagation, blast-radius tracking, and incident records.
 
 ## Design goals
 
@@ -30,7 +30,7 @@ Early research/prototype. The current implementation focuses on deterministic ac
 - `policies/` — example policy
 - `demo/` — controlled rogue-agent demonstration
 - `tests/` — security and behavior tests
-- `docs/` — architecture and threat model
+- `docs/` — architecture, threat model, and adversarial containment notes
 
 ## Safety
 
