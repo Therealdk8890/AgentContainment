@@ -119,7 +119,9 @@ def main() -> int:
         containment = ContainmentController(
             runtime,
             CapabilitySet({"filesystem.write", "database.write", "network.egress"}),
-            process_containment=LinuxCgroupProcessContainment(group),
+            # Keep process containment separate in this demo so the child can
+            # attempt one post-containment connection and prove the kernel
+            # boundary blocks it before the process is killed.
             kernel_egress=egress,
         )
         policy = PolicyEngine(
@@ -162,8 +164,9 @@ def main() -> int:
         assert not escaped.exists()
         print("Post-containment egress: BLOCKED")
 
-        # Now exercise the process kill boundary explicitly.
-        supervisor.contain(group)
+        # Now exercise the process kill boundary explicitly, after the egress
+        # boundary has already been proven.
+        LinuxCgroupProcessContainment(group).contain()
         child.wait(timeout=3)
         print("Process containment: KILLED")
 
