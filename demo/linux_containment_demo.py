@@ -112,7 +112,7 @@ def main() -> int:
             ]
         )
         service = ContainmentService(audit, cgroup_supervisor=supervisor)
-        service.register(
+        runtime = service.register(
             agent_id,
             metadata={"demo": "linux-adversarial"},
             policy=policy,
@@ -122,7 +122,6 @@ def main() -> int:
         pin_dir = Path("/sys/fs/bpf") / f"agent-containment-demo-{child.pid}"
         pin_dir.mkdir()
 
-        runtime = service._managed(agent_id).runtime
         egress = LinuxEbpfEgressEnforcer(
             str(controller_bin), str(bpf_object), str(group), str(pin_dir)
         )
@@ -134,7 +133,7 @@ def main() -> int:
             # boundary blocks it before the process is killed.
             kernel_egress=egress,
         )
-        service._managed(agent_id).containment = containment
+        service.configure_containment(agent_id, containment)
 
         wait_for(ready)
         start.with_name(start.name + ".release").write_text("go")
