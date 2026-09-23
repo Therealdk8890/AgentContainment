@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 
+class EnforcementClient:
+    """Compatibility alias for the Unix control client."""
+    pass
+
+
 class UnixControlClient:
     def __init__(self, path: str | Path, *, timeout: float = 2.0):
         self.path = str(path)
