@@ -174,10 +174,13 @@ class UnixControlServer:
 
     def _require_privileged(self, request: dict[str, Any]) -> None:
         uid = request.pop("_peer_uid", None)
-        allowed = self.privileged_uids
-        if allowed is None:
+        if self.privileged_uids is not None:
+            allowed = self.privileged_uids
+        elif self.allowed_uids is not None:
             allowed = self.allowed_uids
-        if allowed is None or uid not in allowed:
+        else:
+            return
+        if uid is None or uid not in allowed:
             raise ControlProtocolError("forbidden_command")
 
     def _peer_allowed(self, conn: socket.socket) -> bool:
