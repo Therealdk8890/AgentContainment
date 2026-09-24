@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, NamedTuple
 
@@ -9,7 +8,6 @@ from .enforcer import EnforcementResult, EnforcementStatus
 from .linux_supervisor import LinuxCgroupSupervisor
 
 
-@dataclass(frozen=True)
 class _WorkloadIdentity(NamedTuple):
     pid: int
     start_time_ticks: int
