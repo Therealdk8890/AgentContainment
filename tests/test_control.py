@@ -1,3 +1,5 @@
+import pytest
+
 from agent_containment.containment import CapabilitySet, ContainmentController
 from agent_containment.control import ContainmentService
 from agent_containment.models import Action, DecisionType
@@ -42,7 +44,6 @@ def test_identity_token_denies_missing_and_wrong_credentials():
     action = Action("agent-1", "a1", "read", "workspace")
     assert service.authorize(action).decision is DecisionType.DENY
     assert service.authorize(action, identity_token="wrong").decision is DecisionType.DENY
-
 
 
 def test_identity_token_is_revoked_by_containment_and_must_be_reissued_after_recovery():
@@ -142,7 +143,6 @@ def test_cgroup_identity_cannot_be_bypassed_by_matching_pid_alone():
         peer_pid=123,
         cgroup_membership=lambda pid, path: False,
     ).decision is DecisionType.DENY
-
 
 
 def test_recovery_authorization_is_single_use():
