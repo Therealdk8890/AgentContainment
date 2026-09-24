@@ -15,6 +15,7 @@ from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
+from .runtime_fence import RuntimeFenceRegistry
 
 
 @dataclass(frozen=True)
@@ -45,12 +46,14 @@ class ContainmentService:
         audit: AuditLog | None = None,
         cgroup_supervisor=None,
         incidents: IncidentRegistry | None = None,
+        fences: RuntimeFenceRegistry | None = None,
     ):
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
         self.audit = audit
         self.cgroup_supervisor = cgroup_supervisor
         self.incidents = incidents or IncidentRegistry()
+        self.fences = fences or RuntimeFenceRegistry()
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -65,7 +68,19 @@ class ContainmentService:
             # Durable containment is an admission fence. A controller restart
             # must never turn a previously contained agent into an executable
             # runtime merely because its in-memory Runtime object was rebuilt.
+            durable_fence = self.fences.get(agent_id)
             prior_incident = self.incidents.latest_for_agent(agent_id)
+            if durable_fence is not None:
+                if containment is None:
+                    runtime.restore_contained(durable_fence.containment_epoch)
+                elif runtime.can_execute:
+                    raise RuntimeError(
+                        "agent has a durable runtime fence; supplied runtime must already be contained"
+                    )
+                elif runtime.state is RuntimeState.CONTAINED and runtime.epoch != durable_fence.containment_epoch:
+                    raise RuntimeError(
+                        "supplied contained runtime epoch does not match durable runtime fence"
+                    )
             if prior_incident is not None and prior_incident.state is IncidentState.RECOVERED:
                 if prior_incident.recovery_epoch is None:
                     raise RuntimeError("durable recovered incident is missing recovery epoch")
@@ -218,6 +233,11 @@ class ContainmentService:
         # persistence.
         with self._lock:
             managed = self._managed(agent_id)
+            next_epoch = managed.runtime.epoch + 1
+            # Establish a durable fence before the runtime transition. If
+            # incident persistence fails after containment, a fresh controller
+            # can still reconstruct the fail-closed boundary from this fence.
+            self.fences.prepare(agent_id, next_epoch)
             report = managed.containment.contain()
             # Identity credentials are leases over an executable trust epoch.
             # Once the runtime fence succeeds, every credential issued before
@@ -330,6 +350,17 @@ class ContainmentService:
             # Recovery starts a fresh execution epoch. Do not let the
             # controller-owned recovery capability itself become reusable.
             managed.recovery_capability = managed.runtime._rotate_recovery_capability()
+            # Clearing the durable fence is deliberately downstream of runtime
+            # recovery. A crash before this clear leaves the agent fail-closed
+            # on the next restart, which is safer than reopening execution.
+            try:
+                self.fences.clear(agent_id)
+            except Exception:
+                # Keep the runtime active in the current process, but preserve
+                # the durable fence if storage cannot be updated. A future
+                # controller must therefore fail closed until the state is
+                # reconciled explicitly.
+                pass
 
             if self.audit:
                 try:
