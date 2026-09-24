@@ -99,6 +99,22 @@ class Runtime:
             self.state = RuntimeState.ACTIVE
             return self._epoch
 
+    def restore_active(self, epoch: int) -> None:
+        """Restore an already-recovered executable runtime after restart."""
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative")
+        with self._lock:
+            if self.state is RuntimeState.ACTIVE:
+                if self._epoch != epoch:
+                    raise ValueError(
+                        f"active runtime epoch mismatch: {self._epoch} != {epoch}"
+                    )
+                return
+            if self.state is not RuntimeState.ACTIVE:
+                self.state = RuntimeState.ACTIVE
+                self._epoch = epoch
+                return
+
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
             if self.state is not RuntimeState.ACTIVE:
