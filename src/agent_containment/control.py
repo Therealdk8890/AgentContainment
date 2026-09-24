@@ -217,7 +217,12 @@ class ContainmentService:
         # race a new containment event between the runtime fence and incident
         # persistence.
         with self._lock:
-            report = self._managed(agent_id).containment.contain()
+            managed = self._managed(agent_id)
+            report = managed.containment.contain()
+            # Identity credentials are leases over an executable trust epoch.
+            # Once the runtime fence succeeds, every credential issued before
+            # containment must become unusable, including after recovery.
+            self._revoke_identity(managed)
             incident_id = self._incident_id(agent_id, report.epoch)
 
             # The containment decision is authoritative even when persistence
@@ -322,6 +327,10 @@ class ContainmentService:
                 self.incidents.restore_contained(incident.incident_id)
                 raise
 
+            # Recovery starts a fresh execution epoch. Do not let the
+            # controller-owned recovery capability itself become reusable.
+            managed.recovery_capability = managed.runtime._rotate_recovery_capability()
+
             if self.audit:
                 try:
                     self.audit.record(
@@ -350,6 +359,12 @@ class ContainmentService:
     @staticmethod
     def _incident_id(agent_id: str, epoch: int) -> str:
         return f"{agent_id}:containment:{epoch}"
+
+    @staticmethod
+    def _revoke_identity(managed: ManagedAgent) -> None:
+        """Invalidate every previously issued workload identity credential."""
+        managed.identity_digest = None
+        managed.identity_pid = None
 
     @staticmethod
     def _digest_token(token: str) -> str:
