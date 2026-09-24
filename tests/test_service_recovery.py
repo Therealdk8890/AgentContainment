@@ -213,6 +213,27 @@ def test_containment_after_recovery_persistence_failure_fails_closed_on_restart(
 
 
 
+def test_recovery_authorization_is_invalid_after_controller_restart(tmp_path):
+    incident_path = tmp_path / "incidents.json"
+    first = ContainmentService(incidents=IncidentRegistry(incident_path))
+    runtime = first.register("agent-restart-auth")
+    first.contain("agent-restart-auth")
+    stale = first.issue_recovery_authorization("agent-restart-auth")
+
+    second = ContainmentService(incidents=IncidentRegistry(incident_path))
+    second.register(
+        "agent-restart-auth",
+        containment=ContainmentController(runtime),
+    )
+
+    with pytest.raises(PermissionError, match="stale"):
+        second.recover("agent-restart-auth", stale)
+
+    fresh = second.issue_recovery_authorization("agent-restart-auth")
+    assert second.recover("agent-restart-auth", fresh) == 2
+    assert runtime.state is RuntimeState.ACTIVE
+
+
 def test_recovery_authorization_cannot_be_fabricated_with_wrong_capability(tmp_path):
     incidents = IncidentRegistry(tmp_path / "incidents.json")
     service = ContainmentService(incidents=incidents)
