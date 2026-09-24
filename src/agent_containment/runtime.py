@@ -99,7 +99,7 @@ class Runtime:
             self.state = RuntimeState.ACTIVE
             return self._epoch
 
-    def restore_active(self, epoch: int) -> None:
+    def _restore_active(self, epoch: int) -> None:
         """Restore an already-recovered executable runtime after restart."""
         if epoch < 0:
             raise ValueError("epoch must be non-negative")
