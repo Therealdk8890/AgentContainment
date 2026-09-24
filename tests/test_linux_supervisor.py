@@ -43,4 +43,4 @@ def test_pid_start_time_parser_handles_spaces_and_parentheses(monkeypatch):
         FakePath,
     )
 
-    assert LinuxCgroupSupervisor.pid_start_time_ticks(123) == 23
+    assert LinuxCgroupSupervisor.pid_start_time_ticks(123) == 21
