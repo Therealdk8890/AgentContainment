@@ -156,6 +156,8 @@ class IncidentRegistry:
             raise ValueError("proof_reference must be non-empty")
         with self._lock:
             current = self._require(incident_id)
+            if current.state is IncidentState.RECOVERED:
+                raise ValueError("cannot attach proof after recovery")
             updated = IncidentRecord(
                 incident_id=current.incident_id,
                 agent_id=current.agent_id,
@@ -166,6 +168,7 @@ class IncidentRegistry:
                 proof_reference=proof_reference,
                 reason=current.reason,
                 proof_degraded_reason=current.proof_degraded_reason,
+                recovery_epoch=current.recovery_epoch,
             )
             candidate = dict(self._records)
             candidate[incident_id] = updated
