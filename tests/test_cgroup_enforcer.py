@@ -47,3 +47,17 @@ def test_missing_cgroup_state_fails_closed(tmp_path):
 
     assert enforcer.verify_contained("agent-1").status is EnforcementStatus.VERIFICATION_FAILED
     assert enforcer.verify_released("agent-1").status is EnforcementStatus.VERIFICATION_FAILED
+
+
+def test_recreated_cgroup_fails_identity_verification(tmp_path):
+    path = _cgroup(tmp_path)
+    enforcer = CgroupV2Enforcer({"agent-1": path})
+
+    (path / "cgroup.kill").unlink()
+    (path / "cgroup.events").unlink()
+    path.rmdir()
+    path.mkdir()
+    (path / "cgroup.kill").write_text("")
+    (path / "cgroup.events").write_text("populated 0\nfrozen 0\n")
+
+    assert enforcer.verify_released("agent-1").status is EnforcementStatus.VERIFICATION_FAILED
