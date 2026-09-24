@@ -20,6 +20,12 @@ Traditional agent guardrails often operate inside the application or framework e
 
 This separation is intended to remain useful when an agent is compromised, misbehaving, or attempting to bypass its normal tool wrapper.
 
+### cgroup v2 provider
+
+The optional `CgroupV2Enforcer` adapts a dedicated Linux cgroup v2 workload boundary to the provider-neutral enforcement interface. It uses `cgroup.kill` for containment and verifies state through `cgroup.events`. Configured cgroups are identity-bound using filesystem metadata so a deleted-and-recreated path is not silently accepted as the original workload boundary. An empty cgroup is treated as evidence that the current workload has exited; the AgentContainment durable admission fence remains the controller-owned authority that prevents recovery without explicit authorization.
+
+This adapter is a Linux enforcement integration, not a claim that the Python control plane alone provides kernel-level isolation. Production deployments should provision and protect the cgroup hierarchy outside the agent trust boundary and validate the privileged integration on the target host.
+
 ## Enforcement layers
 
 AgentContainment uses defense in depth:
