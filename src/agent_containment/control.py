@@ -187,12 +187,20 @@ class ContainmentService:
 
         # The containment decision is authoritative even when persistence is
         # degraded. Record the fact first; proof/audit is downstream.
-        self.incidents.record_containment(
-            incident_id,
-            agent_id,
-            report.epoch,
-            reason="controller containment requested",
-        )
+        incident_persistence_failure: str | None = None
+        try:
+            self.incidents.record_containment(
+                incident_id,
+                agent_id,
+                report.epoch,
+                reason="controller containment requested",
+            )
+        except Exception as exc:
+            # Runtime containment has already succeeded. A storage failure
+            # must not turn a contained agent into an apparent failure.
+            incident_persistence_failure = (
+                f"incident persistence unavailable: {type(exc).__name__}: {exc}"
+            )
 
         if self.audit:
             try:
@@ -213,6 +221,8 @@ class ContainmentService:
                     incident_id,
                     reason=f"audit persistence unavailable: {type(exc).__name__}: {exc}",
                 )
+        if incident_persistence_failure is not None:
+            return report.with_persistence_failure(incident_persistence_failure)
         return report
 
     def incident(self, agent_id: str) -> IncidentRecord | None:
