@@ -11,6 +11,7 @@ from typing import Callable
 
 from .audit import AuditLog
 from .containment import ContainmentController, ContainmentReport
+from .incident_state import IncidentRecord, IncidentRegistry
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
@@ -28,13 +29,19 @@ class ManagedAgent:
 
 
 class ContainmentService:
-    """Controller-owned registry, identity, and containment API."""
+    """Controller-owned registry, identity, containment, and recovery API."""
 
-    def __init__(self, audit: AuditLog | None = None, cgroup_supervisor=None):
+    def __init__(
+        self,
+        audit: AuditLog | None = None,
+        cgroup_supervisor=None,
+        incidents: IncidentRegistry | None = None,
+    ):
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
         self.audit = audit
         self.cgroup_supervisor = cgroup_supervisor
+        self.incidents = incidents or IncidentRegistry()
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -56,7 +63,6 @@ class ContainmentService:
             return runtime
 
     def configure_containment(self, agent_id: str, containment: ContainmentController) -> None:
-        """Attach controller-owned enforcement to an already registered agent."""
         with self._lock:
             managed = self._managed(agent_id)
             if containment.runtime is not managed.runtime:
@@ -64,7 +70,6 @@ class ContainmentService:
             managed.containment = containment
 
     def create_workload(self, agent_id: str) -> str:
-        """Create the controller-owned cgroup identity boundary for an agent."""
         if self.cgroup_supervisor is None:
             raise RuntimeError("cgroup supervisor is not configured")
         with self._lock:
@@ -75,15 +80,13 @@ class ContainmentService:
             managed.identity_cgroup = str(Path(path).resolve())
             if self.audit:
                 self.audit.record(
-                    "workload_created",
-                    agent_id=agent_id,
+                    "workload_created", agent_id=agent_id,
                     reason="controller-created cgroup identity boundary",
                     cgroup_path=managed.identity_cgroup,
                 )
             return managed.identity_cgroup
 
     def attach_workload(self, agent_id: str, pid: int) -> str:
-        """Attach a process to the controller-created workload cgroup."""
         if self.cgroup_supervisor is None:
             raise RuntimeError("cgroup supervisor is not configured")
         if pid <= 0:
@@ -95,21 +98,17 @@ class ContainmentService:
             self.cgroup_supervisor.attach_pid(managed.identity_cgroup, pid)
             if self.audit:
                 self.audit.record(
-                    "workload_attached",
-                    agent_id=agent_id,
+                    "workload_attached", agent_id=agent_id,
                     reason="controller attached process to workload cgroup",
-                    pid=pid,
-                    cgroup_path=managed.identity_cgroup,
+                    pid=pid, cgroup_path=managed.identity_cgroup,
                 )
             return managed.identity_cgroup
 
     def identity_cgroup(self, agent_id: str) -> str | None:
-        """Return the controller-assigned cgroup identity for an agent."""
         with self._lock:
             return self._managed(agent_id).identity_cgroup
 
     def issue_identity_token(self, agent_id: str, *, peer_pid: int | None = None) -> str:
-        """Issue a token after the controller has established workload identity."""
         if peer_pid is not None and peer_pid <= 0:
             raise ValueError("peer_pid must be positive")
         with self._lock:
@@ -161,14 +160,42 @@ class ContainmentService:
 
     def contain(self, agent_id: str) -> ContainmentReport:
         report = self._managed(agent_id).containment.contain()
+        incident_id = self._incident_id(agent_id, report.epoch)
+
+        # The containment decision is authoritative even when persistence is
+        # degraded. Record the fact first; proof/audit is downstream.
+        self.incidents.record_containment(
+            incident_id,
+            agent_id,
+            report.epoch,
+            reason="controller containment requested",
+        )
+
         if self.audit:
-            self.audit.record(
-                "containment", agent_id=agent_id, decision=DecisionType.CONTAIN.value,
-                reason="controller containment requested", epoch=report.epoch,
-                stages=list(report.stages), failures=list(report.failures),
-                complete=report.complete,
-            )
+            try:
+                self.audit.record(
+                    "containment", agent_id=agent_id,
+                    decision=DecisionType.CONTAIN.value,
+                    reason="controller containment requested",
+                    epoch=report.epoch, incident_id=incident_id,
+                    stages=list(report.stages), failures=list(report.failures),
+                    complete=report.complete,
+                )
+            except Exception as exc:
+                # Never turn a successful runtime fence into an apparent
+                # containment failure merely because proof/audit persistence
+                # is unavailable. Preserve the known epoch and degrade the
+                # incident explicitly instead.
+                self.incidents.mark_proof_degraded(
+                    incident_id,
+                    reason=f"audit persistence unavailable: {type(exc).__name__}: {exc}",
+                )
         return report
+
+    def incident(self, agent_id: str) -> IncidentRecord | None:
+        """Return the latest persisted incident for an agent, if any."""
+        records = [r for r in self.incidents.all() if r.agent_id == agent_id]
+        return max(records, key=lambda record: record.created_at, default=None)
 
     def report(self, agent_id: str) -> ContainmentReport | None:
         return self._managed(agent_id).containment.last_report
@@ -176,6 +203,10 @@ class ContainmentService:
     def snapshot(self) -> dict[str, RuntimeState]:
         with self._lock:
             return {agent_id: item.runtime.state for agent_id, item in self._agents.items()}
+
+    @staticmethod
+    def _incident_id(agent_id: str, epoch: int) -> str:
+        return f"{agent_id}:containment:{epoch}"
 
     @staticmethod
     def _digest_token(token: str) -> str:
