@@ -71,7 +71,7 @@ def test_dangerous_sequence_triggers_halt():
     assert not second.blocked
     assert third.blocked
     assert third.decision is not None
-    assert third.decision.decision.value == "halt"
+    assert third.decision.value == "halt"
     assert "prevent-download-upload-delete" in third.reason
     assert runtime.state is RuntimeState.HALTED
 
