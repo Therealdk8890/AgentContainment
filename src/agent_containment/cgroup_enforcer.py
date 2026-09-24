@@ -34,7 +34,7 @@ class CgroupV2Enforcer:
         stat = path.stat()
         if not path.is_dir():
             raise ValueError(f"cgroup path is not a directory: {path}")
-        return _CgroupIdentity(stat.st_dev, stat.st_ino)
+        return _CgroupIdentity(stat.st_dev, stat.st_ino, stat.st_ctime_ns)
 
     def _path(self, agent_id: str) -> Path | None:
         return self._cgroup_paths.get(agent_id)
