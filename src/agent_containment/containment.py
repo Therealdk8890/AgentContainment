@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from .credentials import CredentialStore
 from .runtime import Runtime, RuntimeState
 
 
@@ -24,9 +25,11 @@ class ContainmentReport:
 
 class ContainmentController:
     def __init__(self, runtime: Runtime, capabilities: CapabilitySet | None = None,
-                 process_containment=None, kernel_egress=None):
+                 process_containment=None, kernel_egress=None,
+                 credentials: CredentialStore | None = None):
         self.runtime = runtime
         self.capabilities = capabilities or CapabilitySet()
+        self.credentials = credentials
         self.egress = None
         self.process_containment = process_containment
         self.kernel_egress = kernel_egress
@@ -39,8 +42,9 @@ class ContainmentController:
         self.runtime.halt()
 
     def contain(self) -> ContainmentReport:
-        # Fence first. Once this returns, all previously issued application
-        # and egress leases are stale even if a later enforcement stage fails.
+        # Fence first. Once this returns, all previously issued application,
+        # egress, and credential leases are stale even if later enforcement
+        # stages fail.
         self.runtime.contain()
         stages: list[str] = ["runtime_fenced"]
         failures: list[str] = []
@@ -52,10 +56,11 @@ class ContainmentController:
                 callback()
                 stages.append(name)
             except Exception as exc:
-                # Never restore execution after the fence. A partial
-                # containment report is safer than silently weakening the
-                # boundary because one enforcement adapter failed.
+                # Never restore execution after the fence.
                 failures.append(f"{name}: {type(exc).__name__}: {exc}")
+
+        if self.credentials is not None:
+            enforce("credentials_revoked", self.credentials.revoke_all)
 
         if self.kernel_egress is not None:
             enforce("kernel_egress_contained", self.kernel_egress.contain)
