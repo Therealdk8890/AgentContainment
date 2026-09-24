@@ -252,11 +252,10 @@ def test_register_rejects_invalid_workload_pid_without_registration(tmp_path):
         allowed_uids={os.getuid()},
         privileged_uids={os.getuid()},
     )
-    response = server.handle(
-        {"command": "register", "agent_id": "bad-workload", "workload_pid": True},
-        peer_uid=os.getuid(),
-    )
+    with pytest.raises(ControlProtocolError, match="positive integer"):
+        server.handle(
+            {"command": "register", "agent_id": "bad-workload", "workload_pid": True},
+            peer_uid=os.getuid(),
+        )
 
-    assert response["ok"] is False
-    assert "positive integer" in response["error"]
     assert service.snapshot() == {}
