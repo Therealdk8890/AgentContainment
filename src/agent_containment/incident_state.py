@@ -32,6 +32,7 @@ class IncidentRecord:
     proof_attached: bool = False
     proof_reference: str | None = None
     reason: str | None = None
+    proof_degraded_reason: str | None = None
 
 
 class IncidentRegistry:
@@ -86,7 +87,8 @@ class IncidentRegistry:
                 state=IncidentState.PROOF_DEGRADED,
                 containment_epoch=current.containment_epoch,
                 created_at=current.created_at,
-                reason=reason,
+                reason=current.reason,
+                proof_degraded_reason=reason,
             )
             self._records[incident_id] = updated
             self._persist_locked()
