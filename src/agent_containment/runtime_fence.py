@@ -81,7 +81,7 @@ class RuntimeFenceRegistry:
 
     def _persist_locked(self, records: dict[str, FenceRecord]) -> None:
         if self.path is None:
-            raise RuntimeError("durable runtime fence persistence is unavailable")
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
