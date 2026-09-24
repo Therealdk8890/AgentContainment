@@ -72,8 +72,10 @@ class IncidentRegistry:
                 created_at=time(),
                 reason=reason,
             )
-            self._records[incident_id] = record
-            self._persist_locked()
+            candidate = dict(self._records)
+            candidate[incident_id] = record
+            self._persist_locked(candidate)
+            self._records = candidate
             return record
 
     def mark_proof_degraded(self, incident_id: str, *, reason: str) -> IncidentRecord:
@@ -90,8 +92,10 @@ class IncidentRegistry:
                 reason=current.reason,
                 proof_degraded_reason=reason,
             )
-            self._records[incident_id] = updated
-            self._persist_locked()
+            candidate = dict(self._records)
+            candidate[incident_id] = updated
+            self._persist_locked(candidate)
+            self._records = candidate
             return updated
 
     def attach_proof(self, incident_id: str, proof_reference: str) -> IncidentRecord:
@@ -110,8 +114,10 @@ class IncidentRegistry:
                 reason=current.reason,
                 proof_degraded_reason=current.proof_degraded_reason,
             )
-            self._records[incident_id] = updated
-            self._persist_locked()
+            candidate = dict(self._records)
+            candidate[incident_id] = updated
+            self._persist_locked(candidate)
+            self._records = candidate
             return updated
 
     def latest_for_agent(self, agent_id: str) -> IncidentRecord | None:
@@ -158,15 +164,16 @@ class IncidentRegistry:
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(f"invalid incident registry: {exc}") from exc
 
-    def _persist_locked(self) -> None:
+    def _persist_locked(self, records: dict[str, IncidentRecord] | None = None) -> None:
         if self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        records = self._records if records is None else records
         payload = {
             "version": 1,
             "records": [
                 asdict(record) | {"state": record.state.value}
-                for record in self._records.values()
+                for record in records.values()
             ],
         }
         fd, temp_name = tempfile.mkstemp(
