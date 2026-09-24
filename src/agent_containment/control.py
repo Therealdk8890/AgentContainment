@@ -352,6 +352,20 @@ class ContainmentService:
                     "durable recovery fence could not be cleared; runtime remains contained"
                 ) from exc
 
+            # External enforcement must be released before the runtime can
+            # become executable. If a provider cannot release, restore the
+            # durable admission fence and remain contained.
+            release_failures = managed.containment.release_enforcers()
+            if release_failures:
+                try:
+                    self.fences.prepare(agent_id, incident.containment_epoch)
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "external enforcement could not be released; runtime remains contained: "
+                    + "; ".join(release_failures)
+                )
+
             # Persist the admission decision before enabling execution.
             self.incidents.mark_recovered(incident.incident_id)
             try:
@@ -361,8 +375,7 @@ class ContainmentService:
                 )
             except Exception:
                 self.incidents.restore_contained(incident.incident_id)
-                # Best effort to restore the admission fence. If this fails,
-                # the incident remains contained and recovery has not succeeded.
+                managed.containment.recontain_enforcers()
                 try:
                     self.fences.prepare(agent_id, incident.containment_epoch)
                 except Exception:

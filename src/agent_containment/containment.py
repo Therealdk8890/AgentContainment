@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from .credentials import CredentialStore
+from .enforcer import Enforcer, EnforcementStatus
 from .runtime import Runtime, RuntimeState
 
 
@@ -43,13 +44,15 @@ class ContainmentReport:
 class ContainmentController:
     def __init__(self, runtime: Runtime, capabilities: CapabilitySet | None = None,
                  process_containment=None, kernel_egress=None,
-                 credentials: CredentialStore | None = None):
+                 credentials: CredentialStore | None = None,
+                 enforcers: list[Enforcer] | None = None):
         self.runtime = runtime
         self.capabilities = capabilities or CapabilitySet()
         self.credentials = credentials
         self.egress = None
         self.process_containment = process_containment
         self.kernel_egress = kernel_egress
+        self.enforcers = list(enforcers or [])
         self.last_report: ContainmentReport | None = None
 
     def attach_egress(self, egress) -> None:
@@ -91,6 +94,28 @@ class ContainmentController:
         if self.process_containment is not None:
             enforce("processes_contained", self.process_containment.contain)
 
+        for enforcer in self.enforcers:
+            provider = getattr(enforcer, "name", type(enforcer).__name__)
+            try:
+                result = enforcer.contain(self.runtime.agent_id)
+                if result.status is not EnforcementStatus.ENFORCED:
+                    failures.append(
+                        f"{provider}: contain returned {result.status.value}"
+                        + (f": {result.detail}" if result.detail else "")
+                    )
+                    continue
+                verification = enforcer.verify_contained(self.runtime.agent_id)
+                if verification.status is not EnforcementStatus.ENFORCED:
+                    failures.append(
+                        f"{provider}: containment verification returned "
+                        f"{verification.status.value}"
+                        + (f": {verification.detail}" if verification.detail else "")
+                    )
+                else:
+                    stages.append(f"enforcer:{provider}:verified")
+            except Exception as exc:
+                failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+
         report = ContainmentReport(
             agent_id=self.runtime.agent_id,
             epoch=self.runtime.epoch,
@@ -99,6 +124,54 @@ class ContainmentController:
         )
         self.last_report = report
         return report
+
+    def release_enforcers(self) -> tuple[str, ...]:
+        """Release and independently verify external enforcement boundaries."""
+        failures: list[str] = []
+        for enforcer in reversed(self.enforcers):
+            provider = getattr(enforcer, "name", type(enforcer).__name__)
+            try:
+                result = enforcer.release(self.runtime.agent_id)
+                if result.status is not EnforcementStatus.RELEASED:
+                    failures.append(
+                        f"{provider}: release returned {result.status.value}"
+                        + (f": {result.detail}" if result.detail else "")
+                    )
+                    continue
+                verification = enforcer.verify_released(self.runtime.agent_id)
+                if verification.status is not EnforcementStatus.RELEASED:
+                    failures.append(
+                        f"{provider}: release verification returned "
+                        f"{verification.status.value}"
+                        + (f": {verification.detail}" if verification.detail else "")
+                    )
+            except Exception as exc:
+                failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+        return tuple(failures)
+
+    def recontain_enforcers(self) -> tuple[str, ...]:
+        """Best-effort compensation after a failed recovery transaction."""
+        failures: list[str] = []
+        for enforcer in self.enforcers:
+            provider = getattr(enforcer, "name", type(enforcer).__name__)
+            try:
+                result = enforcer.contain(self.runtime.agent_id)
+                if result.status is not EnforcementStatus.ENFORCED:
+                    failures.append(
+                        f"{provider}: recontain returned {result.status.value}"
+                        + (f": {result.detail}" if result.detail else "")
+                    )
+                    continue
+                verification = enforcer.verify_contained(self.runtime.agent_id)
+                if verification.status is not EnforcementStatus.ENFORCED:
+                    failures.append(
+                        f"{provider}: recontain verification returned "
+                        f"{verification.status.value}"
+                        + (f": {verification.detail}" if verification.detail else "")
+                    )
+            except Exception as exc:
+                failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+        return tuple(failures)
 
     @property
     def contained(self) -> bool:

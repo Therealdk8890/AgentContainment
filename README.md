@@ -1,10 +1,10 @@
 # AgentContainment
 
-**Runtime containment and enforcement for autonomous AI agents.**
+**Runtime containment control plane for autonomous AI agents.**
 
-AgentContainment is a framework-agnostic control plane designed to intercept agent actions, enforce policy, halt compromised runs, revoke authority, contain blast radius, and preserve verifiable incident evidence.
+AgentContainment is a framework-agnostic control plane designed to intercept agent actions, enforce policy, halt compromised runs, revoke authority, contain blast radius, verify external enforcement, and preserve verifiable incident evidence. It is intentionally provider-neutral: platform enforcement can be supplied by cgroup v2/eBPF, Cilium, Tetragon, or another independently verifiable enforcement system.
 
-**Keywords:** AI agent security, agent containment, autonomous agent security, AI runtime security, AI agent firewall, agent firewall, AI agent sandbox, agent sandboxing, AI guardrails, agent governance, AI safety, runtime enforcement, action authorization, policy enforcement, kill switch, incident response, blast radius containment, eBPF, Linux cgroups, cgroup v2, zero trust, defense in depth, tamper-evident audit, security engineering, open source AI security.
+**Keywords:** AI agent security, agent containment, autonomous agent security, AI runtime security, agent security control plane, AI agent firewall, agent firewall, AI agent sandbox, agent sandboxing, AI guardrails, agent governance, AI safety, runtime enforcement, action authorization, policy enforcement, kill switch, incident response, blast radius containment, enforcement verification, Cilium, Tetragon, eBPF, Linux cgroups, cgroup v2, zero trust, defense in depth, tamper-evident audit, security engineering, open source AI security.
 
 ## Core model
 
@@ -33,6 +33,44 @@ AgentContainment uses defense in depth:
 7. **Tamper-evident evidence** — controller-owned audit events are recorded in a hash chain.
 
 No single layer is treated as sufficient.
+
+## Provider-neutral enforcement architecture
+
+AgentContainment owns the **containment decision, durable admission fence, recovery authority, and enforcement verification state**. It does not require a particular kernel or network security product.
+
+The enforcement boundary is intentionally pluggable:
+
+```text
+                    AgentContainment
+             control plane / recovery authority
+                          |
+                 containment decision
+                          v
+              +-----------+-----------+
+              |           |           |
+           Cilium      Tetragon    cgroup/eBPF
+           network      runtime       process/
+          enforcement  enforcement    egress
+              |           |           |
+              +-----------+-----------+
+                          v
+                    OS / network
+                          |
+                          v
+                     Verification
+```
+
+The controller follows:
+
+```text
+REQUEST CONTAINMENT → ENFORCE → VERIFY → CERTIFY CONTAINED
+```
+
+A provider is not considered successfully enforced merely because a command or API request was accepted. Providers return an explicit status such as `ENFORCED`, `VERIFICATION_FAILED`, `DEGRADED`, or `NOT_CONFIGURED`.
+
+Cilium and Tetragon are **optional integration targets, not dependencies of the core library**. AgentContainment is not intended to replace either project's kernel-level enforcement or telemetry capabilities. Its role is to provide an agent-level safety state machine and independent recovery boundary above those mechanisms.
+
+For the current provider API, see `src/agent_containment/enforcer.py`.
 
 ## Stateful policy enforcement
 
@@ -118,7 +156,7 @@ This provides a foundation for multi-agent containment without assuming that eve
 
 ## Status
 
-**Early research/prototype.** The project is currently focused on deterministic enforcement, stateful action policy, runtime fencing, containment, child-agent propagation, OS-level Linux enforcement, and incident evidence.
+**Early research/prototype.** The project is currently focused on deterministic authorization, stateful action policy, runtime fencing, provider-neutral enforcement verification, containment, child-agent propagation, OS-level Linux enforcement, and incident evidence. Cilium/Tetragon adapters are an integration direction rather than core dependencies.
 
 The project should not yet be treated as a production security boundary without validating the host deployment, privilege model, identity binding, policy coverage, and kernel enforcement configuration.
 
