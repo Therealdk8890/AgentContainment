@@ -57,3 +57,20 @@ def test_audit_chain_detects_reorder_and_deletion(tmp_path):
 
 def test_empty_audit_log_is_valid(tmp_path):
     assert AuditLog(tmp_path / "missing.jsonl").verify() == (True, "empty audit log")
+
+
+def test_audit_refuses_to_append_after_tampering(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    log = AuditLog(path)
+    log.record("one", agent_id="a1", timestamp=1.0)
+
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    events[0]["agent_id"] = "attacker"
+    path.write_text(json.dumps(events[0]) + "\n")
+
+    try:
+        log.record("two", agent_id="a1", timestamp=2.0)
+    except RuntimeError as exc:
+        assert "refusing to append" in str(exc)
+    else:
+        raise AssertionError("corrupt audit chain accepted an append")
