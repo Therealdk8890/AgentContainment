@@ -24,3 +24,23 @@ def test_is_populated_parses_cgroup_events(tmp_path):
 
 def test_is_populated_empty_for_missing_events(tmp_path):
     assert not LinuxCgroupSupervisor.is_populated(tmp_path)
+
+
+def test_pid_start_time_parser_handles_spaces_and_parentheses(monkeypatch):
+    class FakePath:
+        def __init__(self, value):
+            self.value = value
+
+        def is_file(self):
+            return True
+
+        def read_text(self):
+            # comm contains spaces and parentheses; start time is field 22.
+            return "123 (worker (agent) name) S " + " ".join(str(i) for i in range(4, 22))
+
+    monkeypatch.setattr(
+        "agent_containment.linux_supervisor.Path",
+        FakePath,
+    )
+
+    assert LinuxCgroupSupervisor.pid_start_time_ticks(123) == 23
