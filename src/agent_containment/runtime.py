@@ -39,6 +39,31 @@ class Runtime:
             self.state = RuntimeState.CONTAINED
             self._epoch += 1
 
+    def restore_contained(self, epoch: int) -> None:
+        """Restore a durably contained runtime without making it executable.
+
+        Recovery is an exact state reconstruction, not a new containment
+        event, so the persisted epoch remains authoritative. This is used
+        only by the controller while rebuilding runtime state from durable
+        incident state.
+        """
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative")
+        with self._lock:
+            if self.state is RuntimeState.ACTIVE:
+                self.state = RuntimeState.CONTAINED
+                self._epoch = epoch
+                return
+            if self.state is RuntimeState.CONTAINED:
+                if self._epoch != epoch:
+                    raise ValueError(
+                        f"contained runtime epoch mismatch: {self._epoch} != {epoch}"
+                    )
+                return
+            raise ValueError(
+                f"cannot restore contained state from runtime state {self.state.value}"
+            )
+
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
             if self.state is not RuntimeState.ACTIVE:
