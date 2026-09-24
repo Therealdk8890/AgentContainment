@@ -70,7 +70,7 @@ class ContainmentService:
                 if prior_incident.recovery_epoch is None:
                     raise RuntimeError("durable recovered incident is missing recovery epoch")
                 if containment is None:
-                    runtime.restore_active(prior_incident.recovery_epoch)
+                    runtime._restore_active(prior_incident.recovery_epoch)
                 elif not runtime.can_execute:
                     raise RuntimeError(
                         "agent has durable recovery state; supplied runtime must be active"
@@ -205,14 +205,18 @@ class ContainmentService:
         return self._managed(agent_id).runtime.state
 
     def contain(self, agent_id: str) -> ContainmentReport:
-        report = self._managed(agent_id).containment.contain()
-        incident_id = self._incident_id(agent_id, report.epoch)
+        # Serialize containment with recovery so no recovery authorization can
+        # race a new containment event between the runtime fence and incident
+        # persistence.
+        with self._lock:
+            report = self._managed(agent_id).containment.contain()
+            incident_id = self._incident_id(agent_id, report.epoch)
 
-        # The containment decision is authoritative even when persistence is
+            # The containment decision is authoritative even when persistence is
         # degraded. Record the fact first; proof/audit is downstream.
-        incident_persistence_failure: str | None = None
-        try:
-            self.incidents.record_containment(
+            incident_persistence_failure: str | None = None
+            try:
+                self.incidents.record_containment(
                 incident_id,
                 agent_id,
                 report.epoch,
@@ -225,8 +229,8 @@ class ContainmentService:
                 f"incident persistence unavailable: {type(exc).__name__}: {exc}"
             )
 
-        if self.audit:
-            try:
+            if self.audit:
+                try:
                 self.audit.record(
                     "containment", agent_id=agent_id,
                     decision=DecisionType.CONTAIN.value,
@@ -235,8 +239,8 @@ class ContainmentService:
                     stages=list(report.stages), failures=list(report.failures),
                     complete=report.complete,
                 )
-            except Exception as exc:
-                # Never turn a successful runtime fence into an apparent
+                except Exception as exc:
+                    # Never turn a successful runtime fence into an apparent
                 # containment failure merely because proof/audit persistence
                 # is unavailable. Preserve the known epoch and degrade the
                 # incident explicitly instead.
@@ -244,9 +248,9 @@ class ContainmentService:
                     incident_id,
                     reason=f"audit persistence unavailable: {type(exc).__name__}: {exc}",
                 )
-        if incident_persistence_failure is not None:
-            return report.with_persistence_failure(incident_persistence_failure)
-        return report
+            if incident_persistence_failure is not None:
+                return report.with_persistence_failure(incident_persistence_failure)
+            return report
 
     def issue_recovery_authorization(self, agent_id: str) -> RecoveryAuthorization:
         """Issue a controller-scoped recovery authorization for a contained agent."""
