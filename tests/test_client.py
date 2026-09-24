@@ -7,6 +7,9 @@ from agent_containment.control import ContainmentService
 from agent_containment.transport import UnixControlServer
 
 
+THREAD_TIMEOUT = 2
+
+
 def test_client_round_trip(tmp_path):
     path = tmp_path / "control.sock"
     server = UnixControlServer(ContainmentService(), path)
@@ -21,18 +24,24 @@ def test_client_round_trip(tmp_path):
         assert result["ok"] and result["state"] == "contained"
     finally:
         server.close()
-        thread.join(timeout=1)
+        thread.join(timeout=THREAD_TIMEOUT)
+    assert not thread.is_alive()
 
 
 def test_client_rejects_non_object_response(tmp_path):
     path = tmp_path / "control.sock"
     server = UnixControlServer(ContainmentService(), path)
     server.start()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(THREAD_TIMEOUT)
             sock.connect(str(path))
             sock.sendall((json.dumps(["not", "an", "object"]) + "\n").encode())
             response = json.loads(sock.recv(4096))
             assert response["ok"] is False
     finally:
         server.close()
+        thread.join(timeout=THREAD_TIMEOUT)
+    assert not thread.is_alive()
