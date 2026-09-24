@@ -234,3 +234,29 @@ def test_transport_denies_token_when_peer_is_outside_workload(tmp_path, monkeypa
         assert "authenticated" in decision["reason"]
     finally:
         server.close()
+
+def test_register_rejects_invalid_workload_pid_without_registration(tmp_path):
+    path = tmp_path / "controller.sock"
+
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            raise AssertionError("workload must not be created for invalid input")
+
+        def attach_pid(self, cgroup_path, pid):
+            raise AssertionError("workload must not be attached for invalid input")
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
+    server = UnixControlServer(
+        service,
+        path,
+        allowed_uids={os.getuid()},
+        privileged_uids={os.getuid()},
+    )
+    response = server.handle(
+        {"command": "register", "agent_id": "bad-workload", "workload_pid": True},
+        peer_uid=os.getuid(),
+    )
+
+    assert response["ok"] is False
+    assert "positive integer" in response["error"]
+    assert service.snapshot() == {}
