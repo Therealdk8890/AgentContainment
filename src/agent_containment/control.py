@@ -70,12 +70,20 @@ class ContainmentService:
                 if prior_incident.recovery_epoch is None:
                     raise RuntimeError("durable recovered incident is missing recovery epoch")
                 if containment is None:
-                    runtime._restore_active(prior_incident.recovery_epoch)
-                elif not runtime.can_execute:
+                    # A RECOVERED incident proves only that the last known
+                    # durable state was active. It cannot prove that a newer
+                    # containment event did not occur while incident persistence
+                    # was unavailable. Never auto-reactivate a fresh runtime on
+                    # restart; require an explicitly supplied active runtime
+                    # reconstructed by a trusted external runtime authority.
+                    raise RuntimeError(
+                        "durable recovery state requires an explicitly supplied active runtime"
+                    )
+                if not runtime.can_execute:
                     raise RuntimeError(
                         "agent has durable recovery state; supplied runtime must be active"
                     )
-                elif runtime.epoch != prior_incident.recovery_epoch:
+                if runtime.epoch != prior_incident.recovery_epoch:
                     raise RuntimeError(
                         "supplied active runtime epoch does not match durable recovery state"
                     )
