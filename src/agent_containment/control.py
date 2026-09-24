@@ -212,42 +212,50 @@ class ContainmentService:
             report = self._managed(agent_id).containment.contain()
             incident_id = self._incident_id(agent_id, report.epoch)
 
-            # The containment decision is authoritative even when persistence is
-        # degraded. Record the fact first; proof/audit is downstream.
+            # The containment decision is authoritative even when persistence
+            # is degraded. Record the fact first; proof/audit is downstream.
             incident_persistence_failure: str | None = None
             try:
                 self.incidents.record_containment(
-                incident_id,
-                agent_id,
-                report.epoch,
-                reason="controller containment requested",
-            )
-        except Exception as exc:
-            # Runtime containment has already succeeded. A storage failure
-            # must not turn a contained agent into an apparent failure.
-            incident_persistence_failure = (
-                f"incident persistence unavailable: {type(exc).__name__}: {exc}"
-            )
+                    incident_id,
+                    agent_id,
+                    report.epoch,
+                    reason="controller containment requested",
+                )
+            except Exception as exc:
+                # Runtime containment has already succeeded. A storage failure
+                # must not turn a contained agent into an apparent failure.
+                incident_persistence_failure = (
+                    f"incident persistence unavailable: {type(exc).__name__}: {exc}"
+                )
 
             if self.audit:
                 try:
-                self.audit.record(
-                    "containment", agent_id=agent_id,
-                    decision=DecisionType.CONTAIN.value,
-                    reason="controller containment requested",
-                    epoch=report.epoch, incident_id=incident_id,
-                    stages=list(report.stages), failures=list(report.failures),
-                    complete=report.complete,
-                )
+                    self.audit.record(
+                        "containment",
+                        agent_id=agent_id,
+                        decision=DecisionType.CONTAIN.value,
+                        reason="controller containment requested",
+                        epoch=report.epoch,
+                        incident_id=incident_id,
+                        stages=list(report.stages),
+                        failures=list(report.failures),
+                        complete=report.complete,
+                    )
                 except Exception as exc:
                     # Never turn a successful runtime fence into an apparent
-                # containment failure merely because proof/audit persistence
-                # is unavailable. Preserve the known epoch and degrade the
-                # incident explicitly instead.
-                self.incidents.mark_proof_degraded(
-                    incident_id,
-                    reason=f"audit persistence unavailable: {type(exc).__name__}: {exc}",
-                )
+                    # containment failure merely because proof/audit persistence
+                    # is unavailable. Preserve the known epoch and degrade the
+                    # incident explicitly instead.
+                    if self.incidents.get(incident_id) is not None:
+                        self.incidents.mark_proof_degraded(
+                            incident_id,
+                            reason=(
+                                f"audit persistence unavailable: "
+                                f"{type(exc).__name__}: {exc}"
+                            ),
+                        )
+
             if incident_persistence_failure is not None:
                 return report.with_persistence_failure(incident_persistence_failure)
             return report
