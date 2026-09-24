@@ -20,6 +20,7 @@ class IncidentState(str, Enum):
     OPEN = "open"
     CONTAINED = "contained"
     PROOF_DEGRADED = "proof_degraded"
+    RECOVERED = "recovered"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,31 @@ class IncidentRegistry:
                 created_at=current.created_at,
                 reason=current.reason,
                 proof_degraded_reason=reason,
+            )
+            candidate = dict(self._records)
+            candidate[incident_id] = updated
+            self._persist_locked(candidate)
+            self._records = candidate
+            return updated
+
+    def mark_recovered(self, incident_id: str) -> IncidentRecord:
+        """Persist recovery admission before the runtime becomes executable."""
+        with self._lock:
+            current = self._require(incident_id)
+            if current.state not in (IncidentState.CONTAINED, IncidentState.PROOF_DEGRADED):
+                raise ValueError(
+                    f"incident is not recoverable from state {current.state.value}"
+                )
+            updated = IncidentRecord(
+                incident_id=current.incident_id,
+                agent_id=current.agent_id,
+                state=IncidentState.RECOVERED,
+                containment_epoch=current.containment_epoch,
+                created_at=current.created_at,
+                proof_attached=current.proof_attached,
+                proof_reference=current.proof_reference,
+                reason=current.reason,
+                proof_degraded_reason=current.proof_degraded_reason,
             )
             candidate = dict(self._records)
             candidate[incident_id] = updated
