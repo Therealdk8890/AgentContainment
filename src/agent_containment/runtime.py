@@ -32,6 +32,7 @@ class Runtime:
         self.state = RuntimeState.ACTIVE
         self._epoch = 0
         self._lock = RLock()
+        self._recovery_capability = _RecoveryCapability()
 
     def halt(self) -> None:
         with self._lock:
@@ -68,6 +69,12 @@ class Runtime:
                 f"cannot restore contained state from runtime state {self.state.value}"
             )
 
+    def _rotate_recovery_capability(self) -> _RecoveryCapability:
+        """Rotate the controller capability when ownership changes."""
+        with self._lock:
+            self._recovery_capability = _RecoveryCapability()
+            return self._recovery_capability
+
     def recover(self, capability: _RecoveryCapability, expected_epoch: int) -> int:
         """Release containment only with the controller-owned capability.
 
@@ -77,8 +84,8 @@ class Runtime:
         """
         if expected_epoch < 0:
             raise ValueError("expected_epoch must be non-negative")
-        if not isinstance(capability, _RecoveryCapability):
-            raise PermissionError("recovery requires controller authorization")
+        if capability is not self._recovery_capability:
+            raise PermissionError("recovery requires current controller authorization")
         with self._lock:
             if self.state is not RuntimeState.CONTAINED:
                 raise RuntimeError(
