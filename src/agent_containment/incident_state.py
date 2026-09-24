@@ -99,6 +99,29 @@ class IncidentRegistry:
             self._records = candidate
             return updated
 
+    def restore_contained(self, incident_id: str) -> IncidentRecord:
+        """Revert a recovery admission if runtime release failed before execution."""
+        with self._lock:
+            current = self._require(incident_id)
+            if current.state is not IncidentState.RECOVERED:
+                raise ValueError("incident is not in recovered state")
+            updated = IncidentRecord(
+                incident_id=current.incident_id,
+                agent_id=current.agent_id,
+                state=IncidentState.CONTAINED,
+                containment_epoch=current.containment_epoch,
+                created_at=current.created_at,
+                proof_attached=current.proof_attached,
+                proof_reference=current.proof_reference,
+                reason=current.reason,
+                proof_degraded_reason=current.proof_degraded_reason,
+            )
+            candidate = dict(self._records)
+            candidate[incident_id] = updated
+            self._persist_locked(candidate)
+            self._records = candidate
+            return updated
+
     def mark_recovered(self, incident_id: str) -> IncidentRecord:
         """Persist recovery admission before the runtime becomes executable."""
         with self._lock:
