@@ -102,6 +102,6 @@ def test_failed_enforcement_never_transitions_runtime_back_to_active():
     controller.contain()
 
     with pytest.raises(PermissionError):
-        runtime.recover()
+        runtime.recover(object(), runtime.epoch)
 
     assert runtime.state is RuntimeState.CONTAINED
