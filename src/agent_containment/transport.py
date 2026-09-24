@@ -216,6 +216,18 @@ class UnixControlServer:
         return agent_id
 
     @staticmethod
+    def _optional_cgroup(request: dict[str, Any]) -> str | None:
+        value = request.get("cgroup_path")
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise ControlProtocolError("cgroup_path must be a non-empty string of at most 4096 characters")
+        path = Path(value)
+        if not path.is_absolute() or not path.is_dir():
+            raise ControlProtocolError("cgroup_path must be an existing absolute directory")
+        return str(path.resolve())
+
+    @staticmethod
     def _metadata(request: dict[str, Any]) -> dict[str, str]:
         metadata = request.get("metadata", {})
         if not isinstance(metadata, dict) or any(
