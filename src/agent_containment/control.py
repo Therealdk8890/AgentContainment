@@ -53,6 +53,11 @@ class ContainmentService:
         self.audit = audit
         self.cgroup_supervisor = cgroup_supervisor
         self.incidents = incidents or IncidentRegistry()
+        if fences is None and self.incidents.path is not None:
+            fence_path = self.incidents.path.with_name(
+                f"{self.incidents.path.stem}.fences{self.incidents.path.suffix}"
+            )
+            fences = RuntimeFenceRegistry(fence_path)
         self.fences = fences or RuntimeFenceRegistry()
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
