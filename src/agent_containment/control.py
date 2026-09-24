@@ -67,9 +67,17 @@ class ContainmentService:
             # runtime merely because its in-memory Runtime object was rebuilt.
             prior_incident = self.incidents.latest_for_agent(agent_id)
             if prior_incident is not None and prior_incident.state is IncidentState.RECOVERED:
-                if not runtime.can_execute:
+                if prior_incident.recovery_epoch is None:
+                    raise RuntimeError("durable recovered incident is missing recovery epoch")
+                if containment is None:
+                    runtime.restore_active(prior_incident.recovery_epoch)
+                elif not runtime.can_execute:
                     raise RuntimeError(
                         "agent has durable recovery state; supplied runtime must be active"
+                    )
+                elif runtime.epoch != prior_incident.recovery_epoch:
+                    raise RuntimeError(
+                        "supplied active runtime epoch does not match durable recovery state"
                     )
             elif prior_incident is not None and prior_incident.state in (
                 IncidentState.CONTAINED,
