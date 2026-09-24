@@ -114,6 +114,14 @@ class IncidentRegistry:
             self._persist_locked()
             return updated
 
+    def latest_for_agent(self, agent_id: str) -> IncidentRecord | None:
+        """Return the latest incident for *agent_id*, if one exists."""
+        if not agent_id:
+            raise ValueError("agent_id must be non-empty")
+        with self._lock:
+            records = [r for r in self._records.values() if r.agent_id == agent_id]
+            return max(records, key=lambda record: record.created_at, default=None)
+
     def get(self, incident_id: str) -> IncidentRecord | None:
         with self._lock:
             return self._records.get(incident_id)
