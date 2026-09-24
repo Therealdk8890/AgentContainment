@@ -44,10 +44,17 @@ class LinuxCgroupSupervisor:
         status = Path(f"/proc/{pid}/stat")
         if not status.is_file():
             raise ProcessLookupError(pid)
-        fields = status.read_text().split()
-        if len(fields) < 22:
+        record = status.read_text()
+        # /proc/<pid>/stat field 2 (comm) may contain spaces and parentheses.
+        # Locate its final ')' rather than using a naïve whitespace split.
+        closing = record.rfind(")")
+        if closing < 0:
+            raise RuntimeError(f"process {pid} stat record is malformed")
+        fields = record[closing + 2 :].split()
+        # The remaining sequence starts at field 3; field 22 is index 19.
+        if len(fields) < 20:
             raise RuntimeError(f"process {pid} stat record is incomplete")
-        return int(fields[21])
+        return int(fields[19])
 
     @staticmethod
     def pid_cgroup_path(pid: int) -> str:
