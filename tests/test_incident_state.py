@@ -20,6 +20,8 @@ def test_proof_failure_marks_incident_degraded_without_changing_containment_epoc
     assert degraded.state is IncidentState.PROOF_DEGRADED
     assert degraded.containment_epoch == 7
     assert degraded.proof_attached is False
+    assert degraded.proof_degraded_reason == "proof persistence unavailable"
+    assert degraded.reason is None
 
 
 def test_proof_can_be_attached_later_without_inventing_history():
@@ -35,6 +37,7 @@ def test_proof_can_be_attached_later_without_inventing_history():
     assert recovered.containment_epoch == original.containment_epoch
     assert recovered.created_at == original.created_at
     assert recovered.reason == original.reason
+    assert recovered.proof_degraded_reason == "DPK unavailable"
 
 
 def test_duplicate_incident_is_rejected():
