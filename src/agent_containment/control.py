@@ -80,7 +80,7 @@ class ContainmentService:
                     runtime.restore_contained(durable_fence.containment_epoch)
                 elif runtime.can_execute:
                     raise RuntimeError(
-                        "agent has a durable runtime fence; supplied runtime must already be contained"
+                        "agent has durable containment state; supplied runtime must already be contained"
                     )
                 elif runtime.state is RuntimeState.CONTAINED and runtime.epoch != durable_fence.containment_epoch:
                     raise RuntimeError(
