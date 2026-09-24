@@ -86,7 +86,7 @@ class ContainmentService:
                     raise RuntimeError(
                         "supplied contained runtime epoch does not match durable runtime fence"
                     )
-            if prior_incident is not None and prior_incident.state is IncidentState.RECOVERED:
+            if durable_fence is None and prior_incident is not None and prior_incident.state is IncidentState.RECOVERED:
                 if prior_incident.recovery_epoch is None:
                     raise RuntimeError("durable recovered incident is missing recovery epoch")
                 if containment is None:
