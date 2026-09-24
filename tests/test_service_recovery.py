@@ -166,7 +166,7 @@ def test_recovery_fails_closed_when_incident_persistence_is_unavailable(tmp_path
     assert service.incident("agent-recovery-storage").state is IncidentState.CONTAINED
 
 
-def test_recovered_incident_does_not_recontain_agent_after_restart(tmp_path):
+def test_recovered_incident_requires_explicit_runtime_after_restart(tmp_path):
     incident_path = tmp_path / "incidents.json"
     first = ContainmentService(incidents=IncidentRegistry(incident_path))
     runtime = first.register("agent-restart-recovered")
@@ -175,10 +175,41 @@ def test_recovered_incident_does_not_recontain_agent_after_restart(tmp_path):
     assert first.recover("agent-restart-recovered", authorization) == 2
 
     second = ContainmentService(incidents=IncidentRegistry(incident_path))
-    restored = second.register("agent-restart-recovered")
+    with pytest.raises(RuntimeError, match="explicitly supplied active runtime"):
+        second.register("agent-restart-recovered")
 
+    supplied = Runtime("agent-restart-recovered")
+    supplied._restore_active(2)
+    restored = second.register(
+        "agent-restart-recovered",
+        containment=ContainmentController(supplied),
+    )
     assert restored.state is RuntimeState.ACTIVE
     assert restored.epoch == 2
+
+
+def test_containment_after_recovery_persistence_failure_fails_closed_on_restart(tmp_path):
+    incident_path = tmp_path / "incidents.json"
+    first = ContainmentService(incidents=IncidentRegistry(incident_path))
+    runtime = first.register("agent-recovery-contain-failure")
+    first.contain("agent-recovery-contain-failure")
+    authorization = first.issue_recovery_authorization("agent-recovery-contain-failure")
+    assert first.recover("agent-recovery-contain-failure", authorization) == 2
+
+    def fail_persist(_records=None):
+        raise OSError("disk full")
+
+    first.incidents._persist_locked = fail_persist
+    report = first.contain("agent-recovery-contain-failure")
+
+    assert report.complete
+    assert not report.durable
+    assert runtime.state is RuntimeState.CONTAINED
+    assert first.incident("agent-recovery-contain-failure").state is IncidentState.RECOVERED
+
+    restarted = ContainmentService(incidents=IncidentRegistry(incident_path))
+    with pytest.raises(RuntimeError, match="explicitly supplied active runtime"):
+        restarted.register("agent-recovery-contain-failure")
 
 
 
