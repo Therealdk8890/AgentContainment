@@ -178,4 +178,37 @@ def test_recovered_incident_does_not_recontain_agent_after_restart(tmp_path):
     restored = second.register("agent-restart-recovered")
 
     assert restored.state is RuntimeState.ACTIVE
-    assert restored.epoch == 0
+    assert restored.epoch == 2
+
+
+
+def test_recovery_authorization_cannot_be_fabricated_with_wrong_capability(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-fake")
+    service.contain("agent-fake")
+    authorization = service.issue_recovery_authorization("agent-fake")
+
+    fake = type(authorization)(
+        agent_id=authorization.agent_id,
+        containment_epoch=authorization.containment_epoch,
+        _capability=object(),
+    )
+
+    with pytest.raises(PermissionError, match="stale"):
+        service.recover("agent-fake", fake)
+
+    assert runtime.state is RuntimeState.CONTAINED
+
+
+def test_proof_attachment_cannot_reopen_a_recovered_incident(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    service.register("agent-proof-after")
+    service.contain("agent-proof-after")
+    auth = service.issue_recovery_authorization("agent-proof-after")
+    service.recover("agent-proof-after", auth)
+
+    incident = service.incident("agent-proof-after")
+    with pytest.raises(ValueError, match="after recovery"):
+        incidents.attach_proof(incident.incident_id, "proof-1")
