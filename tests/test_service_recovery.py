@@ -103,3 +103,79 @@ def test_containment_survives_incident_persistence_failure(tmp_path):
     assert report.persistence_failures
     assert service.status("agent-storage") is RuntimeState.CONTAINED
     assert service.incident("agent-storage") is None
+
+
+
+def test_recovery_requires_controller_authorization_and_invalidates_stale_leases(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-recover")
+    old_lease = runtime.acquire_lease()
+    assert old_lease is not None
+
+    service.contain("agent-recover")
+    authorization = service.issue_recovery_authorization("agent-recover")
+    epoch = service.recover("agent-recover", authorization)
+
+    assert epoch == 2
+    assert runtime.state is RuntimeState.ACTIVE
+    assert runtime.execute_if_active(old_lease, lambda: "stale") is None
+
+    new_lease = runtime.acquire_lease()
+    assert new_lease is not None
+    assert runtime.execute_if_active(new_lease, lambda: "ok") == "ok"
+    assert service.incident("agent-recover").state is IncidentState.RECOVERED
+
+
+def test_stale_controller_recovery_authorization_is_rejected(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    first = ContainmentService(incidents=incidents)
+    runtime = first.register("agent-controller")
+    first.contain("agent-controller")
+    stale = first.issue_recovery_authorization("agent-controller")
+
+    second = ContainmentService(incidents=IncidentRegistry(incidents.path))
+    second.register(
+        "agent-controller",
+        containment=ContainmentController(runtime),
+    )
+
+    with pytest.raises(PermissionError, match="stale"):
+        second.recover("agent-controller", stale)
+
+    fresh = second.issue_recovery_authorization("agent-controller")
+    assert second.recover("agent-controller", fresh) == 2
+
+
+def test_recovery_fails_closed_when_incident_persistence_is_unavailable(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-recovery-storage")
+    service.contain("agent-recovery-storage")
+    authorization = service.issue_recovery_authorization("agent-recovery-storage")
+
+    def fail_persist(_records=None):
+        raise OSError("disk full")
+
+    incidents._persist_locked = fail_persist
+
+    with pytest.raises(OSError, match="disk full"):
+        service.recover("agent-recovery-storage", authorization)
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert service.incident("agent-recovery-storage").state is IncidentState.CONTAINED
+
+
+def test_recovered_incident_does_not_recontain_agent_after_restart(tmp_path):
+    incident_path = tmp_path / "incidents.json"
+    first = ContainmentService(incidents=IncidentRegistry(incident_path))
+    runtime = first.register("agent-restart-recovered")
+    first.contain("agent-restart-recovered")
+    authorization = first.issue_recovery_authorization("agent-restart-recovered")
+    assert first.recover("agent-restart-recovered", authorization) == 2
+
+    second = ContainmentService(incidents=IncidentRegistry(incident_path))
+    restored = second.register("agent-restart-recovered")
+
+    assert restored.state is RuntimeState.ACTIVE
+    assert restored.epoch == 0
