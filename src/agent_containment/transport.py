@@ -116,16 +116,30 @@ class UnixControlServer:
         if command == "register":
             self._require_privileged(peer_uid)
             agent_id = self._agent_id(request)
-            runtime = self.service.register(agent_id, metadata=self._metadata(request))
-            cgroup_path = self.service.create_workload(agent_id) if self.service.cgroup_supervisor is not None else None
             workload_pid = request.get("workload_pid")
             if workload_pid is not None:
                 if not isinstance(workload_pid, int) or isinstance(workload_pid, bool) or workload_pid <= 0:
                     raise ControlProtocolError("workload_pid must be a positive integer")
-                if cgroup_path is None:
+                if self.service.cgroup_supervisor is None:
                     raise ControlProtocolError("workload_pid requires a configured cgroup supervisor")
-                self.service.attach_workload(agent_id, workload_pid)
-            token = self.service.issue_identity_token(agent_id, peer_pid=workload_pid) if workload_pid is not None else None
+
+            # Validate all request fields before mutating controller state.
+            # Registration is a security boundary: malformed workload
+            # parameters must not leave behind a live agent or partially-created
+            # identity state.
+            runtime = self.service.register(agent_id, metadata=self._metadata(request))
+            try:
+                cgroup_path = self.service.create_workload(agent_id) if self.service.cgroup_supervisor is not None else None
+                if workload_pid is not None:
+                    self.service.attach_workload(agent_id, workload_pid)
+                token = self.service.issue_identity_token(agent_id, peer_pid=workload_pid) if workload_pid is not None else None
+            except Exception:
+                # Do not leave a registered active runtime behind when workload
+                # admission fails. The containment controller is still
+                # controller-owned; unregistering here removes the incomplete
+                # registration without attempting to infer external cgroup state.
+                self.service.unregister(agent_id)
+                raise
             return {
                 "ok": True,
                 "agent_id": agent_id,
@@ -200,18 +214,6 @@ class UnixControlServer:
         if not isinstance(agent_id, str) or not agent_id or len(agent_id) > 256:
             raise ControlProtocolError("agent_id must be a non-empty string of at most 256 characters")
         return agent_id
-
-    @staticmethod
-    def _optional_cgroup(request: dict[str, Any]) -> str | None:
-        value = request.get("cgroup_path")
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value or len(value) > 4096:
-            raise ControlProtocolError("cgroup_path must be a non-empty string of at most 4096 characters")
-        path = Path(value)
-        if not path.is_absolute() or not path.is_dir():
-            raise ControlProtocolError("cgroup_path must be an existing absolute directory")
-        return str(path.resolve())
 
     @staticmethod
     def _metadata(request: dict[str, Any]) -> dict[str, str]:
