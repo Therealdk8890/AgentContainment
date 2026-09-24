@@ -208,8 +208,11 @@ def test_containment_after_recovery_persistence_failure_fails_closed_on_restart(
     assert first.incident("agent-recovery-contain-failure").state is IncidentState.RECOVERED
 
     restarted = ContainmentService(incidents=IncidentRegistry(incident_path))
-    with pytest.raises(RuntimeError, match="explicitly supplied active runtime"):
-        restarted.register("agent-recovery-contain-failure")
+    restored = restarted.register("agent-recovery-contain-failure")
+
+    assert restored.state is RuntimeState.CONTAINED
+    assert restored.epoch == 3
+    assert restored.acquire_lease() is None
 
 
 

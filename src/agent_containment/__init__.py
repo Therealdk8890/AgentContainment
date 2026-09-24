@@ -5,11 +5,12 @@ from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
+from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 
 __all__ = [
     "Action", "ActionGateway", "Decision", "DecisionType",
     "ContainmentService", "ManagedAgent", "RecoveryAuthorization",
     "IncidentRecord", "IncidentRegistry", "IncidentState",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
-    "LinuxCgroupSupervisor",
+    "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
 ]
