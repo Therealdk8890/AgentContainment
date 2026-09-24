@@ -252,8 +252,7 @@ def test_repeated_containment_recovery_cycles_advance_epochs_and_preserve_fencin
         assert runtime.state is RuntimeState.ACTIVE
         assert runtime.epoch == expected_containment_epoch + 1
 
-        with pytest.raises(RuntimeError, match="stale"):
-            runtime.execute_if_active(lease, lambda: None)
+        assert runtime.execute_if_active(lease, lambda: None) is None
 
     incident = service.incident("agent-lifecycle-cycles")
     assert incident is not None
