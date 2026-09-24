@@ -36,11 +36,11 @@ def test_pid_start_time_parser_handles_spaces_and_parentheses(monkeypatch):
 
         def read_text(self):
             # comm contains spaces and parentheses; start time is field 22.
-            return "123 (worker (agent) name) S " + " ".join(str(i) for i in range(4, 22))
+            return "123 (worker (agent) name) S " + " ".join(str(i) for i in range(3, 23))
 
     monkeypatch.setattr(
         "agent_containment.linux_supervisor.Path",
         FakePath,
     )
 
-    assert LinuxCgroupSupervisor.pid_start_time_ticks(123) == 21
+    assert LinuxCgroupSupervisor.pid_start_time_ticks(123) == 22
