@@ -16,7 +16,12 @@ def _canonical(value: dict[str, Any]) -> bytes:
 
 
 class AuditLog:
-    """Append-only hash chain. Verification detects edits, deletion, and reorder."""
+    """Append-only hash chain.
+
+    The chain is tamper-evident, not externally immutable: an attacker who can
+    delete the file can remove history. Verification therefore fails closed
+    before appending to an already-corrupt chain.
+    """
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -30,14 +35,23 @@ class AuditLog:
         if not isinstance(agent_id, str) or not agent_id:
             raise ValueError("agent_id must be non-empty")
         with self._lock:
-            previous_hash = GENESIS
             if self.path.exists():
+                ok, verification_reason = self.verify()
+                if not ok:
+                    raise RuntimeError(
+                        f"refusing to append to invalid audit chain: {verification_reason}"
+                    )
                 lines = [line for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
-                if lines:
-                    previous_hash = json.loads(lines[-1])["hash"]
+            else:
+                lines = []
+
+            previous_hash = GENESIS
+            if lines:
+                previous_hash = json.loads(lines[-1])["hash"]
+
             event: dict[str, Any] = {
                 "version": 1,
-                "sequence": 1 if previous_hash == GENESIS else len(lines) + 1,
+                "sequence": 1 if not lines else len(lines) + 1,
                 "timestamp": time() if timestamp is None else timestamp,
                 "event_type": event_type,
                 "agent_id": agent_id,
