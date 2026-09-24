@@ -1,3 +1,5 @@
+import pytest
+
 from agent_containment.control import ContainmentService
 from agent_containment.incident_state import IncidentRegistry
 from agent_containment.runtime import RuntimeState
@@ -76,7 +78,15 @@ def test_recovery_does_not_clear_fence_if_fence_persistence_fails(tmp_path):
     )
     recovering.register("agent-fence-recovery")
     authorization = recovering.issue_recovery_authorization("agent-fence-recovery")
-    assert recovering.recover("agent-fence-recovery", authorization) == 2
+
+    with pytest.raises(RuntimeError, match="durable recovery fence could not be cleared"):
+        recovering.recover("agent-fence-recovery", authorization)
+
+    assert recovering.status("agent-fence-recovery") is RuntimeState.CONTAINED
+    incident = recovering.incident("agent-fence-recovery")
+    assert incident is not None
+    assert incident.state.value == "contained"
+    assert recovering.fences.get("agent-fence-recovery") is not None
 
     restarted = ContainmentService(
         incidents=IncidentRegistry(incident_path),
