@@ -152,12 +152,8 @@ def test_recovery_authorization_is_single_use():
     authorization = service.issue_recovery_authorization("agent-recovery")
     service.recover("agent-recovery", authorization)
 
-    try:
+    with pytest.raises(PermissionError, match="recovery authorization is stale"):
         service.recover("agent-recovery", authorization)
-    except RuntimeError as exc:
-        assert "no durably recoverable containment incident" in str(exc)
-    else:
-        raise AssertionError("recovery authorization must not be reusable")
 
 
 def test_configure_containment_uses_public_api():
