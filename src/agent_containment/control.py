@@ -17,6 +17,14 @@ from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
 
 
+@dataclass(frozen=True)
+class RecoveryAuthorization:
+    """Controller-issued recovery authorization bound to one agent and epoch."""
+    agent_id: str
+    containment_epoch: int
+    _capability: object = field(repr=False, compare=False)
+
+
 @dataclass
 class ManagedAgent:
     runtime: Runtime
@@ -26,6 +34,7 @@ class ManagedAgent:
     identity_digest: str | None = None
     identity_pid: int | None = None
     identity_cgroup: str | None = None
+    recovery_capability: object | None = field(default=None, repr=False)
 
 
 class ContainmentService:
@@ -81,6 +90,7 @@ class ContainmentService:
                 metadata=dict(metadata or {}),
                 policy=policy or PolicyEngine(),
             )
+            self._agents[agent_id].recovery_capability = runtime._rotate_recovery_capability()
             if self.audit:
                 self.audit.record("agent_registered", agent_id=agent_id)
             return runtime
@@ -224,6 +234,74 @@ class ContainmentService:
         if incident_persistence_failure is not None:
             return report.with_persistence_failure(incident_persistence_failure)
         return report
+
+    def issue_recovery_authorization(self, agent_id: str) -> RecoveryAuthorization:
+        """Issue a controller-scoped recovery authorization for a contained agent."""
+        with self._lock:
+            managed = self._managed(agent_id)
+            incident = self.incidents.latest_for_agent(agent_id)
+            if incident is None or incident.state not in (
+                IncidentState.CONTAINED,
+                IncidentState.PROOF_DEGRADED,
+            ):
+                raise RuntimeError("agent has no durably recoverable containment incident")
+            if managed.runtime.state is not RuntimeState.CONTAINED:
+                raise RuntimeError("runtime is not contained")
+            if managed.runtime.epoch != incident.containment_epoch:
+                raise RuntimeError("runtime epoch does not match durable containment")
+            return RecoveryAuthorization(
+                agent_id=agent_id,
+                containment_epoch=incident.containment_epoch,
+                _capability=managed.recovery_capability,
+            )
+
+    def recover(self, agent_id: str, authorization: RecoveryAuthorization) -> int:
+        """Durably authorize and then release a contained runtime."""
+        with self._lock:
+            managed = self._managed(agent_id)
+            if not isinstance(authorization, RecoveryAuthorization):
+                raise PermissionError("recovery requires controller authorization")
+            if authorization.agent_id != agent_id:
+                raise PermissionError("recovery authorization is bound to another agent")
+            if authorization._capability is not managed.recovery_capability:
+                raise PermissionError("recovery authorization is stale")
+            incident = self.incidents.latest_for_agent(agent_id)
+            if incident is None or incident.state not in (
+                IncidentState.CONTAINED,
+                IncidentState.PROOF_DEGRADED,
+            ):
+                raise RuntimeError("agent has no durably recoverable containment incident")
+            if authorization.containment_epoch != incident.containment_epoch:
+                raise PermissionError("recovery authorization epoch is stale")
+            if managed.runtime.state is not RuntimeState.CONTAINED:
+                raise RuntimeError("runtime is not contained")
+            if managed.runtime.epoch != incident.containment_epoch:
+                raise RuntimeError("runtime epoch does not match durable containment")
+
+            # Persist the admission decision before enabling execution.
+            self.incidents.mark_recovered(incident.incident_id)
+            try:
+                epoch = managed.runtime.recover(
+                    managed.recovery_capability,
+                    incident.containment_epoch,
+                )
+            except Exception:
+                self.incidents.restore_contained(incident.incident_id)
+                raise
+
+            if self.audit:
+                try:
+                    self.audit.record(
+                        "recovery", agent_id=agent_id,
+                        decision="recover",
+                        reason="controller recovery authorization accepted",
+                        epoch=epoch,
+                        incident_id=incident.incident_id,
+                    )
+                except Exception:
+                    # Incident state remains authoritative; audit is downstream proof.
+                    pass
+            return epoch
 
     def incident(self, agent_id: str) -> IncidentRecord | None:
         """Return the latest persisted incident for an agent, if any."""
