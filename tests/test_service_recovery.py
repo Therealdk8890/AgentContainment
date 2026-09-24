@@ -212,3 +212,41 @@ def test_proof_attachment_cannot_reopen_a_recovered_incident(tmp_path):
     incident = service.incident("agent-proof-after")
     with pytest.raises(ValueError, match="after recovery"):
         incidents.attach_proof(incident.incident_id, "proof-1")
+
+
+
+def test_containment_and_recovery_are_serialized(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-race-recovery")
+    service.contain("agent-race-recovery")
+    auth = service.issue_recovery_authorization("agent-race-recovery")
+
+    import threading
+
+    barrier = threading.Barrier(2, timeout=2)
+    results = []
+
+    def recover():
+        barrier.wait()
+        try:
+            results.append(("recover", service.recover("agent-race-recovery", auth)))
+        except Exception as exc:
+            results.append(("recover-error", type(exc).__name__))
+
+    def contain():
+        barrier.wait()
+        results.append(("contain", service.contain("agent-race-recovery").epoch))
+
+    t1 = threading.Thread(target=recover)
+    t2 = threading.Thread(target=contain)
+    t1.start()
+    t2.start()
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+    assert len(results) == 2
+    assert runtime.state in (RuntimeState.ACTIVE, RuntimeState.CONTAINED)
+    assert service.incident("agent-race-recovery") is not None
