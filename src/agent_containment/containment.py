@@ -125,18 +125,25 @@ class ContainmentController:
         self.last_report = report
         return report
 
-
     def release_enforcers(self) -> tuple[str, ...]:
-        """Release external enforcement boundaries without changing runtime state."""
+        """Release and independently verify external enforcement boundaries."""
         failures: list[str] = []
         for enforcer in reversed(self.enforcers):
             provider = getattr(enforcer, "name", type(enforcer).__name__)
             try:
                 result = enforcer.release(self.runtime.agent_id)
-                if result.status is not EnforcementStatus.ENFORCED:
+                if result.status is not EnforcementStatus.RELEASED:
                     failures.append(
                         f"{provider}: release returned {result.status.value}"
                         + (f": {result.detail}" if result.detail else "")
+                    )
+                    continue
+                verification = enforcer.verify_released(self.runtime.agent_id)
+                if verification.status is not EnforcementStatus.RELEASED:
+                    failures.append(
+                        f"{provider}: release verification returned "
+                        f"{verification.status.value}"
+                        + (f": {verification.detail}" if verification.detail else "")
                     )
             except Exception as exc:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
@@ -153,6 +160,14 @@ class ContainmentController:
                     failures.append(
                         f"{provider}: recontain returned {result.status.value}"
                         + (f": {result.detail}" if result.detail else "")
+                    )
+                    continue
+                verification = enforcer.verify_contained(self.runtime.agent_id)
+                if verification.status is not EnforcementStatus.ENFORCED:
+                    failures.append(
+                        f"{provider}: recontain verification returned "
+                        f"{verification.status.value}"
+                        + (f": {verification.detail}" if verification.detail else "")
                     )
             except Exception as exc:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
