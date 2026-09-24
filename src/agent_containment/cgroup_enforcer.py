@@ -50,7 +50,13 @@ class CgroupV2Enforcer:
     def _path(self, agent_id: str) -> Path | None:
         return self._cgroup_paths.get(agent_id)
 
-    def _verify_workload(self, agent_id: str, path: Path) -> EnforcementResult | None:
+    def _verify_workload(
+        self,
+        agent_id: str,
+        path: Path,
+        *,
+        allow_missing: bool = False,
+    ) -> EnforcementResult | None:
         expected = self._workload_identities.get(agent_id)
         if expected is None:
             return None
@@ -68,14 +74,21 @@ class CgroupV2Enforcer:
                     EnforcementStatus.VERIFICATION_FAILED,
                     f"workload PID is outside cgroup for {agent_id}",
                 )
-        except (OSError, ValueError, RuntimeError, ProcessLookupError) as exc:
+        except ProcessLookupError as exc:
+            if allow_missing:
+                return None
+            return EnforcementResult(
+                self.name,
+                EnforcementStatus.VERIFICATION_FAILED,
+                f"workload identity unavailable: {type(exc).__name__}: {exc}",
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
             return EnforcementResult(
                 self.name,
                 EnforcementStatus.VERIFICATION_FAILED,
                 f"workload identity unavailable: {type(exc).__name__}: {exc}",
             )
         return None
-
     def _missing(self, agent_id: str) -> EnforcementResult:
         return EnforcementResult(
             self.name,
@@ -136,7 +149,9 @@ class CgroupV2Enforcer:
             identity_failure = self._verify_identity(agent_id, path)
             if identity_failure:
                 return identity_failure
-            workload_failure = self._verify_workload(agent_id, path)
+            workload_failure = self._verify_workload(
+                agent_id, path, allow_missing=True
+            )
             if workload_failure:
                 return workload_failure
             if LinuxCgroupSupervisor.is_populated(path):
