@@ -104,16 +104,8 @@ class Runtime:
         if epoch < 0:
             raise ValueError("epoch must be non-negative")
         with self._lock:
-            if self.state is RuntimeState.ACTIVE:
-                if self._epoch != epoch:
-                    raise ValueError(
-                        f"active runtime epoch mismatch: {self._epoch} != {epoch}"
-                    )
-                return
-            if self.state is not RuntimeState.ACTIVE:
-                self.state = RuntimeState.ACTIVE
-                self._epoch = epoch
-                return
+            self.state = RuntimeState.ACTIVE
+            self._epoch = epoch
 
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
