@@ -37,6 +37,19 @@ class LinuxCgroupSupervisor:
         (path / "cgroup.procs").write_text(f"{pid}\n")
 
     @staticmethod
+    def pid_start_time_ticks(pid: int) -> int:
+        """Return the kernel process-start counter used to defeat PID reuse."""
+        if pid <= 0:
+            raise ValueError("pid must be positive")
+        status = Path(f"/proc/{pid}/stat")
+        if not status.is_file():
+            raise ProcessLookupError(pid)
+        fields = status.read_text().split()
+        if len(fields) < 22:
+            raise RuntimeError(f"process {pid} stat record is incomplete")
+        return int(fields[21])
+
+    @staticmethod
     def pid_cgroup_path(pid: int) -> str:
         if pid <= 0:
             raise ValueError("pid must be positive")
