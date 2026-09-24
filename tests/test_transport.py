@@ -5,7 +5,7 @@ import socket
 import threading
 
 from agent_containment.control import ContainmentService
-from agent_containment.transport import UnixControlServer
+from agent_containment.transport import ControlProtocolError, UnixControlServer
 
 
 def _roundtrip(server, path, payload):
