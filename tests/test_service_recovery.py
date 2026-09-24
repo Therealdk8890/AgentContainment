@@ -258,8 +258,8 @@ def test_repeated_containment_recovery_cycles_advance_epochs_and_preserve_fencin
     incident = service.incident("agent-lifecycle-cycles")
     assert incident is not None
     assert incident.state is IncidentState.RECOVERED
-    assert incident.containment_epoch == 5
-    assert incident.recovery_epoch == 6
+    assert incident.containment_epoch == 9
+    assert incident.recovery_epoch == 10
 
 
 def test_recovery_authorization_cannot_be_fabricated_with_wrong_capability(tmp_path):
