@@ -11,7 +11,7 @@ from typing import Callable
 
 from .audit import AuditLog
 from .containment import ContainmentController, ContainmentReport
-from .incident_state import IncidentRecord, IncidentRegistry
+from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
@@ -52,6 +52,29 @@ class ContainmentService:
             runtime = containment.runtime if containment is not None else Runtime(agent_id)
             if runtime.agent_id != agent_id:
                 raise ValueError("containment runtime agent_id does not match registration")
+
+            # Durable containment is an admission fence. A controller restart
+            # must never turn a previously contained agent into an executable
+            # runtime merely because its in-memory Runtime object was rebuilt.
+            prior_incident = self.incidents.latest_for_agent(agent_id)
+            if prior_incident is not None and prior_incident.state in (
+                IncidentState.CONTAINED,
+                IncidentState.PROOF_DEGRADED,
+            ):
+                if containment is None:
+                    runtime.restore_contained(prior_incident.containment_epoch)
+                elif runtime.can_execute:
+                    raise RuntimeError(
+                        "agent has durable containment state; supplied runtime "
+                        "must already be contained"
+                    )
+                elif runtime.state is RuntimeState.CONTAINED and (
+                    runtime.epoch != prior_incident.containment_epoch
+                ):
+                    raise RuntimeError(
+                        "supplied contained runtime epoch does not match "
+                        "durable containment state"
+                    )
             self._agents[agent_id] = ManagedAgent(
                 runtime=runtime,
                 containment=containment or ContainmentController(runtime),
@@ -194,8 +217,7 @@ class ContainmentService:
 
     def incident(self, agent_id: str) -> IncidentRecord | None:
         """Return the latest persisted incident for an agent, if any."""
-        records = [r for r in self.incidents.all() if r.agent_id == agent_id]
-        return max(records, key=lambda record: record.created_at, default=None)
+        return self.incidents.latest_for_agent(agent_id)
 
     def report(self, agent_id: str) -> ContainmentReport | None:
         return self._managed(agent_id).containment.last_report
