@@ -1,8 +1,11 @@
 import threading
 
-from agent_containment.containment import CapabilitySet, ContainmentController
+from agent_containment.containment import ContainmentController
 from agent_containment.credentials import CredentialStore
 from agent_containment.runtime import Runtime, RuntimeState
+
+
+THREAD_TIMEOUT = 2
 
 
 class FailingCredentialStore(CredentialStore):
@@ -53,7 +56,7 @@ def test_concurrent_revoke_race_invalidates_lease():
     credentials = CredentialStore()
     lease = credentials.issue("prod-api")
     controller = ContainmentController(runtime, credentials=credentials)
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(2, timeout=THREAD_TIMEOUT)
     observed = []
 
     def contain():
@@ -68,9 +71,11 @@ def test_concurrent_revoke_race_invalidates_lease():
     t2 = threading.Thread(target=use_lease)
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+    t1.join(timeout=THREAD_TIMEOUT)
+    t2.join(timeout=THREAD_TIMEOUT)
 
+    assert not t1.is_alive()
+    assert not t2.is_alive()
     assert runtime.state is RuntimeState.CONTAINED
     assert not credentials.valid(lease)
     assert observed in ([True], [False])
