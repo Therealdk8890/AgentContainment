@@ -250,3 +250,44 @@ def test_containment_and_recovery_are_serialized(tmp_path):
     assert len(results) == 2
     assert runtime.state in (RuntimeState.ACTIVE, RuntimeState.CONTAINED)
     assert service.incident("agent-race-recovery") is not None
+
+
+
+def test_recovery_authorization_is_invalid_after_new_containment():
+    incidents = IncidentRegistry()
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-stale-after-contain")
+    service.contain("agent-stale-after-contain")
+    auth = service.issue_recovery_authorization("agent-stale-after-contain")
+    service.recover("agent-stale-after-contain", auth)
+
+    service.contain("agent-stale-after-contain")
+
+    try:
+        service.recover("agent-stale-after-contain", auth)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("stale recovery authorization was accepted")
+
+    assert runtime.state is RuntimeState.CONTAINED
+    incident = service.incident("agent-stale-after-contain")
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert incident.containment_epoch == runtime.epoch
+
+
+def test_execute_if_active_cannot_start_after_containment_transition():
+    runtime = Runtime("agent-execute-containment-race")
+    lease = runtime.acquire_lease()
+    assert lease is not None
+
+    runtime.contain()
+    started = []
+
+    assert runtime.execute_if_active(
+        lease,
+        lambda: started.append(True),
+    ) is None
+    assert started == []
+    assert runtime.state is RuntimeState.CONTAINED
