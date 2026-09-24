@@ -234,6 +234,34 @@ def test_recovery_authorization_is_invalid_after_controller_restart(tmp_path):
     assert runtime.state is RuntimeState.ACTIVE
 
 
+def test_repeated_containment_recovery_cycles_advance_epochs_and_preserve_fencing(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    runtime = service.register("agent-lifecycle-cycles")
+
+    for expected_containment_epoch in range(1, 6):
+        lease = runtime.acquire_lease()
+        report = service.contain("agent-lifecycle-cycles")
+        assert report.complete
+        assert report.epoch == expected_containment_epoch
+        assert runtime.state is RuntimeState.CONTAINED
+        assert not runtime.lease_valid(lease)
+
+        authorization = service.issue_recovery_authorization("agent-lifecycle-cycles")
+        assert service.recover("agent-lifecycle-cycles", authorization) == expected_containment_epoch + 1
+        assert runtime.state is RuntimeState.ACTIVE
+        assert runtime.epoch == expected_containment_epoch + 1
+
+        with pytest.raises(RuntimeError, match="stale"):
+            runtime.execute_if_active(lease, lambda: None)
+
+    incident = service.incident("agent-lifecycle-cycles")
+    assert incident is not None
+    assert incident.state is IncidentState.RECOVERED
+    assert incident.containment_epoch == 5
+    assert incident.recovery_epoch == 6
+
+
 def test_recovery_authorization_cannot_be_fabricated_with_wrong_capability(tmp_path):
     incidents = IncidentRegistry(tmp_path / "incidents.json")
     service = ContainmentService(incidents=incidents)
