@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from threading import RLock
+from typing import Callable, TypeVar
 
 
 class RuntimeState(str, Enum):
@@ -14,6 +15,9 @@ class RuntimeState(str, Enum):
 class ExecutionLease:
     agent_id: str
     epoch: int
+
+
+T = TypeVar("T")
 
 
 class Runtime:
@@ -48,6 +52,23 @@ class Runtime:
                 and lease.epoch == self._epoch
                 and self.state is RuntimeState.ACTIVE
             )
+
+    def execute_if_active(self, lease: ExecutionLease, executor: Callable[[], T]) -> T | None:
+        """Atomically validate a lease and begin the modeled side effect.
+
+        Containment/halt cannot transition the runtime between validation and
+        invocation of executor. Once the executor starts, this primitive does
+        not claim to interrupt the external side effect; real adapters must
+        provide their own cancellation/revocation semantics.
+        """
+        with self._lock:
+            if not (
+                lease.agent_id == self.agent_id
+                and lease.epoch == self._epoch
+                and self.state is RuntimeState.ACTIVE
+            ):
+                return None
+            return executor()
 
     @property
     def epoch(self) -> int:
