@@ -44,6 +44,57 @@ def test_identity_token_denies_missing_and_wrong_credentials():
     assert service.authorize(action, identity_token="wrong").decision is DecisionType.DENY
 
 
+
+def test_identity_token_is_revoked_by_containment_and_must_be_reissued_after_recovery():
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return "/sys/fs/cgroup/demo"
+
+        def attach_pid(self, path, pid):
+            return None
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
+    service.register("agent-identity")
+    service.create_workload("agent-identity")
+    old_token = service.issue_identity_token("agent-identity", peer_pid=123)
+    action = Action("agent-identity", "a1", "read", "workspace")
+    membership = lambda pid, path: True
+
+    assert service.authorize(
+        action,
+        identity_token=old_token,
+        peer_pid=123,
+        cgroup_membership=membership,
+    ).decision is DecisionType.ALLOW
+
+    service.contain("agent-identity")
+    assert service.authorize(
+        action,
+        identity_token=old_token,
+        peer_pid=123,
+        cgroup_membership=membership,
+    ).decision is DecisionType.DENY
+
+    authorization = service.issue_recovery_authorization("agent-identity")
+    service.recover("agent-identity", authorization)
+
+    assert service.authorize(
+        action,
+        identity_token=old_token,
+        peer_pid=123,
+        cgroup_membership=membership,
+    ).decision is DecisionType.DENY
+
+    new_token = service.issue_identity_token("agent-identity", peer_pid=123)
+    assert new_token != old_token
+    assert service.authorize(
+        action,
+        identity_token=new_token,
+        peer_pid=123,
+        cgroup_membership=membership,
+    ).decision is DecisionType.ALLOW
+
+
 def test_cgroup_identity_requires_membership():
     class FakeSupervisor:
         def create_agent(self, agent_id):
@@ -91,6 +142,22 @@ def test_cgroup_identity_cannot_be_bypassed_by_matching_pid_alone():
         peer_pid=123,
         cgroup_membership=lambda pid, path: False,
     ).decision is DecisionType.DENY
+
+
+
+def test_recovery_authorization_is_single_use():
+    service = ContainmentService()
+    service.register("agent-recovery")
+    service.contain("agent-recovery")
+    authorization = service.issue_recovery_authorization("agent-recovery")
+    service.recover("agent-recovery", authorization)
+
+    try:
+        service.recover("agent-recovery", authorization)
+    except RuntimeError as exc:
+        assert "no durably recoverable containment incident" in str(exc)
+    else:
+        raise AssertionError("recovery authorization must not be reusable")
 
 
 def test_configure_containment_uses_public_api():
