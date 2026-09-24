@@ -1,7 +1,12 @@
+import threading
+
 import pytest
 
 from agent_containment.agent_tree import AgentTree
 from agent_containment.runtime import RuntimeState
+
+
+THREAD_TIMEOUT = 2
 
 
 def test_containment_propagates_to_registered_descendants():
@@ -40,7 +45,7 @@ def test_capabilities_are_never_gained_by_child():
 def test_spawn_race_with_parent_containment_has_no_orphan_escape():
     tree = AgentTree()
     tree.register_root("root", {"network"})
-    barrier = __import__("threading").Barrier(2)
+    barrier = threading.Barrier(2, timeout=THREAD_TIMEOUT)
     created = []
 
     def spawn():
@@ -54,14 +59,15 @@ def test_spawn_race_with_parent_containment_has_no_orphan_escape():
         barrier.wait()
         tree.contain("root")
 
-    import threading
     t1 = threading.Thread(target=spawn)
     t2 = threading.Thread(target=contain)
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+    t1.join(timeout=THREAD_TIMEOUT)
+    t2.join(timeout=THREAD_TIMEOUT)
 
+    assert not t1.is_alive()
+    assert not t2.is_alive()
     assert tree.nodes["root"].runtime.state is RuntimeState.CONTAINED
     if created:
         assert created[0].runtime.state is RuntimeState.CONTAINED
