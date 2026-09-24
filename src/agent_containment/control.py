@@ -341,6 +341,17 @@ class ContainmentService:
             if managed.runtime.epoch != incident.containment_epoch:
                 raise RuntimeError("runtime epoch does not match durable containment")
 
+            # Remove the durable admission fence before enabling execution.
+            # If fence persistence fails, recovery stops while the runtime
+            # remains contained. This prevents the current controller from
+            # becoming ACTIVE while a durable fence still says CONTAINED.
+            try:
+                self.fences.clear(agent_id)
+            except Exception as exc:
+                raise RuntimeError(
+                    "durable recovery fence could not be cleared; runtime remains contained"
+                ) from exc
+
             # Persist the admission decision before enabling execution.
             self.incidents.mark_recovered(incident.incident_id)
             try:
@@ -350,22 +361,17 @@ class ContainmentService:
                 )
             except Exception:
                 self.incidents.restore_contained(incident.incident_id)
+                # Best effort to restore the admission fence. If this fails,
+                # the incident remains contained and recovery has not succeeded.
+                try:
+                    self.fences.prepare(agent_id, incident.containment_epoch)
+                except Exception:
+                    pass
                 raise
 
             # Recovery starts a fresh execution epoch. Do not let the
             # controller-owned recovery capability itself become reusable.
             managed.recovery_capability = managed.runtime._rotate_recovery_capability()
-            # Clearing the durable fence is deliberately downstream of runtime
-            # recovery. A crash before this clear leaves the agent fail-closed
-            # on the next restart, which is safer than reopening execution.
-            try:
-                self.fences.clear(agent_id)
-            except Exception:
-                # Keep the runtime active in the current process, but preserve
-                # the durable fence if storage cannot be updated. A future
-                # controller must therefore fail closed until the state is
-                # reconciled explicitly.
-                pass
 
             if self.audit:
                 try:
