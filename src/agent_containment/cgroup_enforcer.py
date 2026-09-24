@@ -13,6 +13,7 @@ from .linux_supervisor import LinuxCgroupSupervisor
 class _CgroupIdentity:
     device: int
     inode: int
+    ctime_ns: int
 
 
 class CgroupV2Enforcer:
@@ -62,6 +63,15 @@ class CgroupV2Enforcer:
                 EnforcementStatus.VERIFICATION_FAILED,
                 f"cgroup identity changed for {agent_id}",
             )
+        # A directory with the right filesystem identity is not sufficient:
+        # require the kernel cgroup v2 control files before trusting its state.
+        for control in ("cgroup.events", "cgroup.kill"):
+            if not (path / control).is_file():
+                return EnforcementResult(
+                    self.name,
+                    EnforcementStatus.VERIFICATION_FAILED,
+                    f"required cgroup control file is missing: {control}",
+                )
         return None
 
     def contain(self, agent_id: str) -> EnforcementResult:
