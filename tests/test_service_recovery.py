@@ -239,7 +239,8 @@ def test_repeated_containment_recovery_cycles_advance_epochs_and_preserve_fencin
     service = ContainmentService(incidents=incidents)
     runtime = service.register("agent-lifecycle-cycles")
 
-    for expected_containment_epoch in range(1, 6):
+    for cycle in range(1, 6):
+        expected_containment_epoch = (cycle * 2) - 1
         lease = runtime.acquire_lease()
         report = service.contain("agent-lifecycle-cycles")
         assert report.complete
