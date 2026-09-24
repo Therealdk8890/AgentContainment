@@ -5,6 +5,9 @@ from agent_containment.containment import ContainmentController
 from agent_containment.runtime import Runtime, RuntimeState
 
 
+THREAD_TIMEOUT = 2
+
+
 def test_stale_lease_is_invalid_after_containment():
     runtime = Runtime("agent-1")
     controller = ContainmentController(runtime)
@@ -32,7 +35,7 @@ def test_concurrent_containment_invalidates_lease_before_execution():
     lease = gateway.acquire_lease()
     assert lease is not None
 
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(2, timeout=THREAD_TIMEOUT)
     executed = []
 
     def attacker():
@@ -51,9 +54,11 @@ def test_concurrent_containment_invalidates_lease_before_execution():
     t2 = threading.Thread(target=worker)
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+    t1.join(timeout=THREAD_TIMEOUT)
+    t2.join(timeout=THREAD_TIMEOUT)
 
+    assert not t1.is_alive()
+    assert not t2.is_alive()
     assert executed == []
     assert runtime.state is RuntimeState.CONTAINED
 
