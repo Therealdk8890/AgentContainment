@@ -85,3 +85,21 @@ def test_corrupt_incident_registry_fails_closed(tmp_path):
 
     with pytest.raises(RuntimeError, match="invalid incident registry"):
         ContainmentService(incidents=IncidentRegistry(incident_path))
+
+
+def test_containment_survives_incident_persistence_failure(tmp_path):
+    incidents = IncidentRegistry(tmp_path / "incidents.json")
+    service = ContainmentService(incidents=incidents)
+    service.register("agent-storage")
+
+    def fail_persist(_records=None):
+        raise OSError("disk full")
+
+    incidents._persist_locked = fail_persist
+    report = service.contain("agent-storage")
+
+    assert report.complete
+    assert not report.durable
+    assert report.persistence_failures
+    assert service.status("agent-storage") is RuntimeState.CONTAINED
+    assert service.incident("agent-storage") is None
