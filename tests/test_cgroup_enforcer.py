@@ -61,3 +61,38 @@ def test_recreated_cgroup_fails_identity_verification(tmp_path):
     (path / "cgroup.events").write_text("populated 0\nfrozen 0\n")
 
     assert enforcer.verify_released("agent-1").status is EnforcementStatus.VERIFICATION_FAILED
+
+
+def test_workload_pid_must_remain_in_bound_cgroup(tmp_path, monkeypatch):
+    path = _cgroup(tmp_path)
+    pid = 1234
+    monkeypatch.setattr(
+        "agent_containment.cgroup_enforcer.LinuxCgroupSupervisor.pid_start_time_ticks",
+        lambda value: 77,
+    )
+    monkeypatch.setattr(
+        "agent_containment.cgroup_enforcer.LinuxCgroupSupervisor.pid_in_cgroup",
+        lambda value, cgroup: False,
+    )
+    enforcer = CgroupV2Enforcer({"agent-1": path}, {"agent-1": pid})
+
+    result = enforcer.verify_contained("agent-1")
+
+    assert result.status is EnforcementStatus.VERIFICATION_FAILED
+    assert "outside cgroup" in result.detail
+
+
+def test_workload_pid_reuse_fails_identity_verification(tmp_path, monkeypatch):
+    path = _cgroup(tmp_path)
+    pid = 1234
+    values = iter([77, 88])
+    monkeypatch.setattr(
+        "agent_containment.cgroup_enforcer.LinuxCgroupSupervisor.pid_start_time_ticks",
+        lambda value: next(values),
+    )
+    enforcer = CgroupV2Enforcer({"agent-1": path}, {"agent-1": pid})
+
+    result = enforcer.verify_contained("agent-1")
+
+    assert result.status is EnforcementStatus.VERIFICATION_FAILED
+    assert "PID identity changed" in result.detail
