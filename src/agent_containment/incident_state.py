@@ -108,6 +108,7 @@ class IncidentRegistry:
                 proof_attached=True,
                 proof_reference=proof_reference,
                 reason=current.reason,
+                proof_degraded_reason=current.proof_degraded_reason,
             )
             self._records[incident_id] = updated
             self._persist_locked()
