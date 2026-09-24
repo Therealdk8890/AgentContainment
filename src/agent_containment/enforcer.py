@@ -10,6 +10,7 @@ class EnforcementStatus(str, Enum):
     """Observed state of an external enforcement boundary."""
 
     ENFORCED = "enforced"
+    RELEASED = "released"
     VERIFICATION_FAILED = "verification_failed"
     DEGRADED = "degraded"
     NOT_CONFIGURED = "not_configured"
@@ -26,6 +27,10 @@ class EnforcementResult:
     @property
     def enforced(self) -> bool:
         return self.status is EnforcementStatus.ENFORCED
+
+    @property
+    def released(self) -> bool:
+        return self.status is EnforcementStatus.RELEASED
 
 
 class Enforcer(Protocol):
@@ -46,6 +51,9 @@ class Enforcer(Protocol):
 
     def verify_contained(self, agent_id: str) -> EnforcementResult:
         """Verify that containment is actually established."""
+
+    def verify_released(self, agent_id: str) -> EnforcementResult:
+        """Verify that the provider's containment boundary is released."""
 
 
 class NoopEnforcer:
@@ -68,6 +76,13 @@ class NoopEnforcer:
         )
 
     def verify_contained(self, agent_id: str) -> EnforcementResult:
+        return EnforcementResult(
+            self.name,
+            EnforcementStatus.NOT_CONFIGURED,
+            "no external enforcement provider configured",
+        )
+
+    def verify_released(self, agent_id: str) -> EnforcementResult:
         return EnforcementResult(
             self.name,
             EnforcementStatus.NOT_CONFIGURED,
