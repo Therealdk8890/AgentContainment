@@ -17,6 +17,10 @@ class ExecutionLease:
     epoch: int
 
 
+class _RecoveryCapability:
+    """Controller-owned capability required for runtime recovery."""
+
+
 T = TypeVar("T")
 
 
@@ -63,6 +67,30 @@ class Runtime:
             raise ValueError(
                 f"cannot restore contained state from runtime state {self.state.value}"
             )
+
+    def recover(self, capability: _RecoveryCapability, expected_epoch: int) -> int:
+        """Release containment only with the controller-owned capability.
+
+        Recovery increments the runtime epoch, invalidating every lease issued
+        before containment. The durable incident transition must be completed
+        by the controller before calling this method.
+        """
+        if expected_epoch < 0:
+            raise ValueError("expected_epoch must be non-negative")
+        if not isinstance(capability, _RecoveryCapability):
+            raise PermissionError("recovery requires controller authorization")
+        with self._lock:
+            if self.state is not RuntimeState.CONTAINED:
+                raise RuntimeError(
+                    f"runtime is not contained: {self.state.value}"
+                )
+            if self._epoch != expected_epoch:
+                raise RuntimeError(
+                    f"contained runtime epoch mismatch: {self._epoch} != {expected_epoch}"
+                )
+            self._epoch += 1
+            self.state = RuntimeState.ACTIVE
+            return self._epoch
 
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
