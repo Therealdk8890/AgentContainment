@@ -17,10 +17,27 @@ class ContainmentReport:
     epoch: int
     stages: tuple[str, ...]
     failures: tuple[str, ...]
+    persistence_failures: tuple[str, ...] = ()
 
     @property
     def complete(self) -> bool:
         return not self.failures
+
+    @property
+    def durable(self) -> bool:
+        """Whether the controller successfully persisted the incident fact."""
+        return not self.persistence_failures
+
+    def with_persistence_failure(self, failure: str) -> "ContainmentReport":
+        if not failure:
+            raise ValueError("failure must be non-empty")
+        return ContainmentReport(
+            agent_id=self.agent_id,
+            epoch=self.epoch,
+            stages=self.stages,
+            failures=self.failures,
+            persistence_failures=self.persistence_failures + (failure,),
+        )
 
 
 class ContainmentController:
