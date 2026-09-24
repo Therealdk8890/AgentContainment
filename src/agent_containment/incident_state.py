@@ -34,6 +34,7 @@ class IncidentRecord:
     proof_reference: str | None = None
     reason: str | None = None
     proof_degraded_reason: str | None = None
+    recovery_epoch: int | None = None
 
 
 class IncidentRegistry:
@@ -92,6 +93,7 @@ class IncidentRegistry:
                 created_at=current.created_at,
                 reason=current.reason,
                 proof_degraded_reason=reason,
+                recovery_epoch=current.recovery_epoch,
             )
             candidate = dict(self._records)
             candidate[incident_id] = updated
@@ -115,6 +117,7 @@ class IncidentRegistry:
                 proof_reference=current.proof_reference,
                 reason=current.reason,
                 proof_degraded_reason=current.proof_degraded_reason,
+                recovery_epoch=current.recovery_epoch,
             )
             candidate = dict(self._records)
             candidate[incident_id] = updated
@@ -140,6 +143,7 @@ class IncidentRegistry:
                 proof_reference=current.proof_reference,
                 reason=current.reason,
                 proof_degraded_reason=current.proof_degraded_reason,
+                recovery_epoch=current.containment_epoch + 1,
             )
             candidate = dict(self._records)
             candidate[incident_id] = updated
