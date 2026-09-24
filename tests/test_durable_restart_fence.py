@@ -1,8 +1,7 @@
-import pytest
-
 from agent_containment.control import ContainmentService
 from agent_containment.incident_state import IncidentRegistry
 from agent_containment.runtime import RuntimeState
+from agent_containment.runtime_fence import RuntimeFenceRegistry
 
 
 class FailingIncidentRegistry(IncidentRegistry):
@@ -16,7 +15,7 @@ def test_restart_stays_contained_when_incident_persistence_fails(tmp_path):
 
     first = ContainmentService(
         incidents=FailingIncidentRegistry(incident_path),
-        fences=__import__("agent_containment.runtime_fence", fromlist=["RuntimeFenceRegistry"]).RuntimeFenceRegistry(fence_path),
+        fences=RuntimeFenceRegistry(fence_path),
     )
     first.register("agent-persistence-failure")
 
@@ -40,8 +39,6 @@ def test_restart_stays_contained_when_incident_persistence_fails(tmp_path):
 def test_durable_fence_blocks_restart_even_without_incident_record(tmp_path):
     fence_path = tmp_path / "fences.json"
 
-    from agent_containment.runtime_fence import RuntimeFenceRegistry
-
     first_fences = RuntimeFenceRegistry(fence_path)
     first_fences.prepare("agent-fence-only", 1)
 
@@ -58,8 +55,6 @@ def test_durable_fence_blocks_restart_even_without_incident_record(tmp_path):
 
 
 def test_recovery_does_not_clear_fence_if_fence_persistence_fails(tmp_path):
-    from agent_containment.runtime_fence import RuntimeFenceRegistry
-
     class FailingClearFenceRegistry(RuntimeFenceRegistry):
         def clear(self, agent_id):
             raise OSError("fence store unavailable")
