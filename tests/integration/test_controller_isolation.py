@@ -144,7 +144,7 @@ except (PermissionError, ConnectionRefusedError, FileNotFoundError, OSError):
     results["ipc"] = "denied"
 
 try:
-    Path(socket_path).unlink()
+    os.unlink(socket_path)
     results["socket_tamper"] = "unexpectedly_allowed"
 except (PermissionError, OSError):
     results["socket_tamper"] = "denied"
