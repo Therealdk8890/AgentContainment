@@ -17,6 +17,7 @@ from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
 from .runtime_fence import RuntimeFenceRegistry
+from .verification_signal import VerificationSignal, decision_from_verification
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,64 @@ class ContainmentService:
                          attributes={"decision": decision.decision.value})
         return decision
 
+    def authorize_verified(self, action: Action, signal: VerificationSignal, *, identity_token: str | None = None,
+                           peer_pid: int | None = None,
+                           cgroup_membership: Callable[[int, str], bool] | None = None) -> Decision:
+        """Authorize an action using verifier output without delegating control authority.
+
+        Normal controller authorization remains the first gate. A verifier
+        cannot elevate a denied action. A bound block becomes a controller
+        HALT and immediately enters durable containment; review becomes PAUSE.
+        """
+        if signal.action_id is not None and signal.action_id != action.action_id:
+            decision = decision_from_verification(action, signal)
+            self._emit_event(
+                "verification_evaluated", agent_id=action.agent_id,
+                trace_id=signal.trace_id, run_id=signal.run_id,
+                action_id=action.action_id, policy_decision_id=action.action_id,
+                reason=decision.reason,
+                attributes={"disposition": signal.disposition,
+                            "report_fingerprint": signal.report_fingerprint,
+                            "policy_fingerprint": signal.policy_fingerprint,
+                            "blocking_claim_ids": list(signal.blocking_claim_ids),
+                            "review_claim_ids": list(signal.review_claim_ids),
+                            "supported_claim_count": signal.supported_claim_count,
+                            "total_claim_count": signal.total_claim_count,
+                            "signal_version": signal.version},
+            )
+            return decision
+
+        base = self.authorize(
+            action,
+            identity_token=identity_token,
+            peer_pid=peer_pid,
+            cgroup_membership=cgroup_membership,
+        )
+        if base.decision is not DecisionType.ALLOW:
+            decision = base
+        else:
+            decision = decision_from_verification(action, signal)
+
+        self._emit_event(
+            "verification_evaluated", agent_id=action.agent_id,
+            trace_id=signal.trace_id, run_id=signal.run_id,
+            action_id=action.action_id, policy_decision_id=action.action_id,
+            reason=decision.reason,
+            attributes={"disposition": signal.disposition,
+                        "report_fingerprint": signal.report_fingerprint,
+                        "policy_fingerprint": signal.policy_fingerprint,
+                        "blocking_claim_ids": list(signal.blocking_claim_ids),
+                        "review_claim_ids": list(signal.review_claim_ids),
+                        "supported_claim_count": signal.supported_claim_count,
+                        "total_claim_count": signal.total_claim_count,
+                        "signal_version": signal.version,
+                        "base_decision": base.decision.value},
+        )
+
+        if base.decision is DecisionType.ALLOW and decision.decision is DecisionType.HALT:
+            self.contain(action.agent_id)
+        return decision
+
     def unregister(self, agent_id: str) -> None:
         with self._lock:
             self._agents.pop(agent_id, None)
@@ -316,6 +375,19 @@ class ContainmentService:
                     reason=incident_persistence_failure,
                 )
                 return report.with_persistence_failure(incident_persistence_failure)
+            if report.complete:
+                self._emit_event(
+                    "containment_certified", agent_id=agent_id,
+                    incident_id=incident_id, containment_epoch=report.epoch,
+                    reason="all configured containment stages completed and external enforcement was verified",
+                )
+            else:
+                self._emit_event(
+                    "containment_verification_failed", agent_id=agent_id,
+                    incident_id=incident_id, containment_epoch=report.epoch,
+                    reason="one or more containment stages or external enforcement verifications failed",
+                    attributes={"failures": list(report.failures)},
+                )
             return report
 
     def issue_recovery_authorization(self, agent_id: str) -> RecoveryAuthorization:
@@ -462,11 +534,16 @@ class ContainmentService:
             self.event_sink(event)
         except Exception:
             if self.audit:
-                self.audit.record(
-                    "governance_event_sink_failure",
-                    agent_id=agent_id,
-                    event_type=event_type,
-                )
+                try:
+                    self.audit.record(
+                        "governance_event_sink_failure",
+                        agent_id=agent_id,
+                        event_type=event_type,
+                    )
+                except Exception:
+                    # Governance integrations are downstream of containment;
+                    # a broken event sink or audit sink must never block control.
+                    pass
 
     def _managed(self, agent_id: str) -> ManagedAgent:
         try:
