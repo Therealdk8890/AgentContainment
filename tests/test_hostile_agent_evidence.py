@@ -63,6 +63,10 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     }
     assert attacks == EXPECTED_ATTACKS
 
+    test_paths = {item["test_path"] for item in payload["tests"]}
+    for item in payload["attack_matrix"]:
+        assert item["test_path"] in test_paths
+
     assert payload["claims"]["universal_security_guarantee"] is False
     assert payload["claims"]["host_cryptographic_attestation"] is False
 
