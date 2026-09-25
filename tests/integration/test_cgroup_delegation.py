@@ -105,8 +105,7 @@ marker.write_text("passed", encoding="utf-8")
             text=True,
             preexec_fn=lambda: os.setuid(nobody),
         )
-        (parent / "cgroup.procs").write_text(f"{child.pid}
-")
+        (parent / "cgroup.procs").write_text(f"{child.pid}\n")
         stdout, stderr = child.communicate(timeout=10)
 
         assert child.returncode == 0, stderr + stdout
