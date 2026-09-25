@@ -26,6 +26,28 @@ def test_incident_can_be_exported_as_regression_fixture():
     assert fixture.to_dict()["incident_id"] == incident.incident_id
     assert fixture.to_dict()["containment_result"] == "contained"
     assert fixture.to_json().startswith('{"action_sequence":')
+    assert len(fixture.fingerprint) == 64
+    assert fixture.fingerprint == fixture.fingerprint
+
+
+def test_regression_fixture_rejects_recovered_incident():
+    incident = IncidentRecord(
+        incident_id="incident-recovered",
+        agent_id="agent-1",
+        state=IncidentState.RECOVERED,
+        containment_epoch=1,
+        created_at=1.0,
+    )
+
+    try:
+        RegressionFixture.from_incident(
+            incident,
+            expected_future_behavior="deny the unsafe action",
+        )
+    except ValueError as exc:
+        assert "contained or proof-degraded" in str(exc)
+    else:
+        raise AssertionError("recovered incident must not become a containment regression fixture")
 
 
 def test_regression_fixture_rejects_empty_expected_behavior():
