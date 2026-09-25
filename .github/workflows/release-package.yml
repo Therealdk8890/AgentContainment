@@ -27,9 +27,6 @@ jobs:
       - name: Validate package metadata
         run: python -m twine check dist/*
 
-      - name: Verify source distribution contents
-        run: python -m twine check dist/*
-
       - name: Install wheel in a clean environment
         run: |
           python -m venv /tmp/agentcontainment-release-test
