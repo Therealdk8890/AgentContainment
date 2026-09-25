@@ -21,13 +21,18 @@ def _wait_for_socket(path: Path, timeout: float = 5.0) -> None:
     raise AssertionError(f"timed out waiting for controller socket: {path}")
 
 
-def _run_as_nobody(code: str, *args: str) -> subprocess.CompletedProcess[str]:
+def _run_as_nobody(code: str, *args: str, cgroup_path: Path) -> subprocess.CompletedProcess[str]:
     nobody = 65534
+
+    def drop_identity_and_join_cgroup() -> None:
+        (cgroup_path / "cgroup.procs").write_text(f"{os.getpid()}\\n")
+        os.setuid(nobody)
+
     return subprocess.run(
         [sys.executable, "-c", code, *args],
         capture_output=True,
         text=True,
-        preexec_fn=lambda: os.setuid(nobody),
+        preexec_fn=drop_identity_and_join_cgroup,
         check=False,
     )
 
@@ -135,7 +140,7 @@ if results != {
 import signal
 ")
         result = _run_as_nobody(
-            agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup)
+            agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup), cgroup_path=agent_cgroup
         )
         assert result.returncode == 0, result.stderr + result.stdout
 
