@@ -12,6 +12,7 @@ from typing import Callable
 from .audit import AuditLog
 from .containment import ContainmentController, ContainmentReport
 from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
+from .governance_event import GovernanceEvent
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
@@ -47,6 +48,7 @@ class ContainmentService:
         cgroup_supervisor=None,
         incidents: IncidentRegistry | None = None,
         fences: RuntimeFenceRegistry | None = None,
+        event_sink: Callable[[GovernanceEvent], None] | None = None,
     ):
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
@@ -59,6 +61,7 @@ class ContainmentService:
             )
             fences = RuntimeFenceRegistry(fence_path)
         self.fences = fences or RuntimeFenceRegistry()
+        self.event_sink = event_sink
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -134,6 +137,7 @@ class ContainmentService:
             self._agents[agent_id].recovery_capability = runtime._rotate_recovery_capability()
             if self.audit:
                 self.audit.record("agent_registered", agent_id=agent_id)
+            self._emit_event("agent_registered", agent_id=agent_id)
             return runtime
 
     def configure_containment(self, agent_id: str, containment: ContainmentController) -> None:
@@ -223,6 +227,10 @@ class ContainmentService:
                 action_id=action.action_id, decision=decision.decision.value,
                 reason=decision.reason,
             )
+        self._emit_event("authorization_decision", agent_id=action.agent_id,
+                         action_id=action.action_id, policy_decision_id=action.action_id,
+                         reason=decision.reason,
+                         attributes={"decision": decision.decision.value})
         return decision
 
     def unregister(self, agent_id: str) -> None:
@@ -294,7 +302,18 @@ class ContainmentService:
                             ),
                         )
 
+            self._emit_event(
+                "containment_enforced", agent_id=agent_id,
+                incident_id=incident_id, containment_epoch=report.epoch,
+                reason="controller containment requested",
+                attributes={"complete": report.complete, "stages": list(report.stages), "failures": list(report.failures)},
+            )
             if incident_persistence_failure is not None:
+                self._emit_event(
+                    "containment_proof_degraded", agent_id=agent_id,
+                    incident_id=incident_id, containment_epoch=report.epoch,
+                    reason=incident_persistence_failure,
+                )
                 return report.with_persistence_failure(incident_persistence_failure)
             return report
 
@@ -428,6 +447,21 @@ class ContainmentService:
     @staticmethod
     def _token_matches(token: str, digest: str) -> bool:
         return hmac.compare_digest(ContainmentService._digest_token(token), digest)
+
+    def _emit_event(self, event_type: str, *, agent_id: str, **kwargs: object) -> None:
+        if self.event_sink is None:
+            return
+        event_id = f"{agent_id}:{event_type}:{secrets.token_hex(8)}"
+        event = GovernanceEvent.create(event_id, event_type, agent_id, **kwargs)
+        try:
+            self.event_sink(event)
+        except Exception:
+            if self.audit:
+                self.audit.record(
+                    "governance_event_sink_failure",
+                    agent_id=agent_id,
+                    event_type=event_type,
+                )
 
     def _managed(self, agent_id: str) -> ManagedAgent:
         try:
