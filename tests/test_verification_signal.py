@@ -1,4 +1,4 @@
-from agent_containment.models import Action, DecisionType
+from agent_containment.models import Action, Decision, DecisionType
 from agent_containment.verification_signal import VerificationSignal, decision_from_verification
 
 
@@ -46,6 +46,7 @@ def test_verified_block_enters_durable_containment_and_emits_linked_events():
         event_sink=events.append,
     )
     service.register("agent-1")
+    service.authorize = lambda action, **kwargs: Decision(action.action_id, DecisionType.ALLOW, "test authorization")
     action = Action("agent-1", "action-1", "publish", "memo")
     decision = service.authorize_verified(
         action,
