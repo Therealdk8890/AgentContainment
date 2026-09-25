@@ -160,3 +160,35 @@ def test_custom_datapath_verifier_failure_does_not_certify_policy():
     result = enforcer.verify_contained("agent-1")
     assert result.status is EnforcementStatus.VERIFICATION_FAILED
     assert "endpoint policy not realized" in result.detail
+
+
+def test_cilium_endpoint_realization_failure_blocks_certification():
+    kubectl = FakeKubectl()
+
+    original = kubectl.__call__
+    def endpoint_not_ready(args, stdin=None):
+        if args[:2] == ["get", "ciliumendpoints"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps({
+                    "items": [{
+                        "status": {
+                            "policy": {
+                                "realized": {"policy-enabled": "egress"}
+                            }
+                        }
+                    }]
+                }),
+                stderr="",
+            )
+        return original(args, stdin)
+
+    enforcer = CiliumNetworkPolicyEnforcer(
+        {"agent-1": {"app": "agent-1"}},
+        kubectl=endpoint_not_ready,
+    )
+    enforcer.contain("agent-1")
+    result = enforcer.verify_contained("agent-1")
+    assert result.status is EnforcementStatus.VERIFICATION_FAILED
+    assert "both ingress and egress" in result.detail
