@@ -1,235 +1,183 @@
-# Governance Platform Architecture
+# Governance platform contract
 
-## Purpose
+AgentContainment is the **control and enforcement** layer in a broader AI-agent
+governance stack. It does not need to own provenance storage or claim
+verification to make those systems useful.
 
-AgentContainment is the control and enforcement primitive in a larger AI-agent governance system. The platform combines three capabilities:
-
-1. **Provenance** — prove what the agent did and what evidence supported it.
-2. **Control** — determine what the agent is allowed to do and independently contain violations.
-3. **Regression** — turn observed failures and containment incidents into repeatable release gates.
-
-The platform should preserve a hard security boundary: provenance and containment may be integrated, but an agent must never be able to authorize its own recovery or rewrite controller-owned incident evidence.
-
-## Closed governance loop
-
-`Observe → Prove → Authorize → Enforce → Contain → Recover → Regression`
-
-### Normal execution
+## Governance loop
 
 ```text
-Agent
-  |
-  v
-Action request
-  |
-  +----> Provenance event
-  |
-  v
-Authorization policy
-  |
-  +---- ALLOW ----> tool/runtime
-  |
-  +---- DENY/HALT ----> incident
+Observe → Prove → Authorize → Enforce → Contain → Recover → Regression
+   ↑                                                        │
+   └──────────────────── release gate ◄─────────────────────┘
 ```
 
-### Incident execution
+The separation of responsibilities is deliberate:
 
-```text
-Policy violation / anomaly
-        |
-        v
-    DETECT
-        |
-        v
-     PROVE
-        |
-        v
-      HALT
-        |
-        v
-    CONTAIN
-        |
-        +---- revoke capabilities
-        +---- fence runtime
-        +---- block network
-        +---- preserve evidence
-        |
-        v
-      MAP
-        |
-        v
-   RECOVERY AUTHORITY
-        |
-        v
-   Regression case
-```
+| Layer | Primary question | Responsibility |
+| --- | --- | --- |
+| DProvenanceKit | What happened? | Trace, evidence, cryptographic provenance, regression evidence |
+| AgentContainment | What was allowed? | Authorization, containment authority, recovery authority, enforcement verification |
+| ClaimProofKit | Is the claim supported? | Claim/evidence relationships and support verification |
+| Hosted control plane | How is it operated? | Inventory, policy management, incidents, RBAC, retention, dashboards, CI/CD integration |
 
-## Integration contract
+These are integration boundaries, not runtime dependencies.
 
-The integration between DProvenanceKit and AgentContainment should be event-oriented rather than tightly coupled.
+## Stable event contract
 
-A governance event should have stable identifiers such as:
+The `GovernanceEvent` envelope is the controller-owned contract intended for
+downstream provenance ingestion.
 
-- `trace_id`
+Core identifiers are:
+
+- `event_id`
+- `event_type`
+- `timestamp`
 - `agent_id`
+- `trace_id`
 - `run_id`
 - `action_id`
 - `policy_decision_id`
 - `incident_id`
 - `containment_epoch`
-- `timestamp`
-- `event_type`
 
-AgentContainment should emit lifecycle events for:
+Optional `attributes` carry provider-specific details without changing the
+top-level contract.
 
-- authorization decision
-- containment requested
-- containment enforced
-- enforcement verification
-- containment certified
-- capability revocation
-- recovery requested
-- recovery authorized
-- recovery completed
-- recovery denied
-- provider degradation
+AgentContainment emits lifecycle events including authorization decisions,
+containment requests, capability revocation, enforcement, certification or
+verification failure, recovery requests/authorization/completion, and proof
+degradation.
 
-DProvenanceKit can bind those events into the provenance/evidence trail without becoming the authority that performs containment.
+### Authority boundary
 
-## Incident-to-regression pipeline
+The event sink is **downstream**. Failure to deliver a governance event must
+not prevent containment, recovery fencing, or other controller decisions.
+Consumers must therefore treat events as an integration stream rather than the
+security boundary itself.
 
-A contained incident should be exportable as a deterministic regression fixture.
+A provenance system may persist and cryptographically bind these events, but
+it must not become the authority that decides whether a runtime is allowed to
+recover.
 
-Minimum fixture fields:
+## Incident → regression
 
-```text
-incident_id
-agent identity
-agent/version
-task/context
-action sequence
-policy decision
-evidence references
-containment result
-expected future behavior
-```
+A contained incident can be exported as a `RegressionFixture`.
 
-The resulting regression gate should be able to assert:
+The fixture intentionally contains identifiers and expected behavior rather
+than copying evidence documents:
 
 ```text
-same trigger
-    →
-same policy decision
-    →
-same containment requirement
-    →
-no previously observed bypass
+incident
+  ├─ agent identity / version
+  ├─ task context
+  ├─ action sequence
+  ├─ policy decision
+  ├─ evidence references
+  ├─ containment result
+  └─ expected future behavior
+          │
+          ▼
+   deterministic regression case
+          │
+          ▼
+       release gate
 ```
 
-This is the mechanism that turns production safety failures into continuously enforced engineering knowledge.
+This allows DProvenanceKit and ClaimProofKit to attach richer evidence without
+forcing AgentContainment to understand their internal representations.
 
-## Platform boundaries
+A useful future regression gate is:
 
-### AgentContainment owns
+1. reproduce the trigger;
+2. observe the same action sequence;
+3. obtain the expected authorization decision;
+4. require the expected containment response;
+5. verify that no bypass occurred;
+6. optionally verify that resulting claims are supported by the attached
+   evidence.
 
-- authorization and policy state
-- containment authority
-- durable admission fencing
-- recovery authority
-- external enforcement verification
-- containment lifecycle
+## Integration contract
 
-### Provenance layer owns
+A downstream governance platform should be able to answer:
 
-- trace/evidence representation
-- cryptographic provenance
-- evidence relationships
-- regression evidence
-- export/verification of provenance records
+1. What did the agent attempt?
+2. What policy decision was made?
+3. What evidence is associated with the action?
+4. Why was containment requested?
+5. Was enforcement independently verified?
+6. Who or what authorized recovery?
+7. Did the incident become a repeatable regression case?
+8. If the agent made a factual claim, is that claim supported by evidence?
 
-### Hosted control plane eventually owns
+AgentContainment owns questions 2, 4, 5, and the recovery boundary. Provenance
+and claim-verification systems own the evidence needed to answer the others.
 
-- organization and agent inventory
-- policy management
-- incident dashboard
-- provenance explorer
-- deployment/provider configuration
-- RBAC
-- retention and evidence storage
-- CI/CD gates
-- audit exports
-
-The hosted layer must not move the containment authority inside the agent process merely for convenience.
-
-## Productization sequence
+## Productization path
 
 ### Phase 1 — Open primitives
 
-- stabilize AgentContainment provider contracts
-- stabilize provenance event schema
-- define the cross-project governance event envelope
-- add incident export → regression fixture
-- document the security boundary
+- stabilize controller lifecycle events;
+- define the shared event envelope;
+- export incidents as regression fixtures;
+- keep provider integrations optional;
+- document security boundaries and failure modes.
 
 ### Phase 2 — Local governance bundle
 
-Provide a reference integration that runs entirely locally:
+Provide a reference integration that connects:
 
 ```text
 Agent
-  |
-  +--> DProvenanceKit
-  |
-  +--> AgentContainment
-          |
-          +--> cgroup/eBPF
-          +--> Cilium
-          +--> Tetragon
+  │
+  ▼
+AgentContainment ─────► GovernanceEvent
+  │                         │
+  │                         ▼
+  │                    DProvenanceKit
+  │                         │
+  │                         ▼
+  └──────── incident ─► ClaimProofKit
+                            │
+                            ▼
+                     regression fixture
 ```
-
-No hosted service should be required for the core safety loop.
 
 ### Phase 3 — Hosted control plane
 
-Add:
+The hosted layer can add organization-level concerns without moving the
+containment authority into a dashboard:
 
-- agent inventory
-- policy editor
-- incident timeline
-- provenance/evidence viewer
-- containment status
-- regression history
-- CI integration
-- organization-level RBAC
-- managed evidence retention
+- agent inventory;
+- policy management;
+- incident timelines;
+- provenance/evidence exploration;
+- containment status;
+- regression history;
+- CI/CD gates;
+- RBAC;
+- retention and audit export;
+- deployment/provider configuration.
 
-### Phase 4 — Vertical application
+### Phase 4 — Vertical applications
 
-CaseClarity can consume the same governance primitives for delegated legal research and document workflows.
+A vertical product such as CaseClarity can consume the same governance
+primitives for delegated legal research and document workflows while keeping
+the generic control/provenance/claim layers reusable.
 
-The vertical product should expose business outcomes rather than infrastructure primitives while retaining the same underlying evidence and containment model.
+## Security boundaries and non-goals
 
-## Non-goals
+- A provenance record does not prove an action was safe.
+- A Kubernetes policy object does not by itself prove that the datapath
+  enforced it.
+- A claim verifier does not contain an agent.
+- Containment cannot undo external side effects that already occurred.
+- A dashboard is not a security boundary.
+- The governance stack does not eliminate deployment-specific host, kernel,
+  identity, credential, and network controls.
 
-The platform should not claim:
+The central design rule remains:
 
-- that provenance proves an agent was harmless;
-- that a Kubernetes policy object alone proves datapath enforcement;
-- that containment reverses completed external side effects;
-- that a hosted dashboard is itself a security boundary;
-- that an AI governance platform eliminates the need for deployment-specific security controls.
-
-## Success criteria
-
-The architecture is working when an operator can answer, for any governed run:
-
-1. **What did the agent attempt?**
-2. **What was it authorized to do?**
-3. **What evidence supports that record?**
-4. **What enforcement actually occurred?**
-5. **Why was containment triggered?**
-6. **Was containment independently verified?**
-7. **Who/what authorized recovery?**
-8. **Was the incident converted into a future regression gate?**
-
-That is the core product loop: **prove, control, and continuously validate autonomous AI behavior.**
+> **Proof can explain what happened. Verification can establish what is
+> supported. Control must independently retain authority to stop and recover
+> the runtime.**
