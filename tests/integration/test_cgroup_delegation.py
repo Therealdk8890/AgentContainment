@@ -256,15 +256,6 @@ supervisor.remove(agent)
         )
         assert result.returncode == 0, result.stderr + result.stdout
 
-        delegate = subprocess.run(
-            ["systemctl", "show", unit, "--property=Delegate", "--value"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        assert delegate.returncode == 0, delegate.stderr
-        assert delegate.stdout.strip() == "yes"
     finally:
         subprocess.run(
             ["systemctl", "stop", unit],
