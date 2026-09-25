@@ -44,6 +44,7 @@ class ContainmentReport:
             stages=self.stages,
             failures=self.failures,
             persistence_failures=self.persistence_failures + (failure,),
+            external_verified=self.external_verified,
         )
 
 
