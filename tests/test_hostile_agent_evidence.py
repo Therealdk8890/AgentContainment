@@ -47,7 +47,28 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
             "result": "passed",
             "exit_code": 0,
             "duration_seconds": 0.1,
-        }
+        },
+        {
+            "name": "cgroup delegation boundary",
+            "test_path": "tests/integration/test_cgroup_delegation.py",
+            "result": "passed",
+            "exit_code": 0,
+            "duration_seconds": 0.1,
+        },
+        {
+            "name": "kernel egress + process containment",
+            "test_path": "tests/integration/test_linux_ebpf.py",
+            "result": "passed",
+            "exit_code": 0,
+            "duration_seconds": 0.1,
+        },
+        {
+            "name": "stale execution lease fencing",
+            "test_path": "tests/test_epoch_fencing_adversarial.py",
+            "result": "passed",
+            "exit_code": 0,
+            "duration_seconds": 0.1,
+        },
     ]
 
     _write_evidence(evidence, "contained")
@@ -70,8 +91,8 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     assert payload["claims"]["universal_security_guarantee"] is False
     assert payload["claims"]["host_cryptographic_attestation"] is False
 
-    assert len(payload["tests"]) == 1
-    assert payload["tests"][0]["result"] == "passed"
+    assert len(payload["tests"]) == 4
+    assert all(item["result"] == "passed" for item in payload["tests"])
 
 
 def test_hostile_agent_evidence_rejects_inconsistent_contained_result(tmp_path, monkeypatch):
