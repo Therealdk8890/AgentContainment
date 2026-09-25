@@ -31,11 +31,15 @@ TESTS = [
         "kernel egress + process containment",
         "tests/integration/test_linux_ebpf.py",
     ),
+    (
+        "stale execution lease fencing",
+        "tests/test_epoch_fencing_adversarial.py",
+    ),
 ]
 
 
 def _run(label: str, path: str) -> int:
-    print(f"\n=== {label.upper()} ===")
+    print(f"\\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-rs", path],
@@ -69,7 +73,7 @@ def main() -> int:
     for label, path in TESTS:
         failures += _run(label, path)
 
-    print("\n=== ATTACK MATRIX ===")
+    print("\\n=== ATTACK MATRIX ===")
     print("controller SIGTERM/SIGKILL      -> denied")
     print("controller ptrace/memory       -> denied")
     print("controller IPC/socket tamper   -> denied")
