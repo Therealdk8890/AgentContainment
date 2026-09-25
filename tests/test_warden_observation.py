@@ -1,3 +1,4 @@
+from agent_containment.control import ContainmentService
 from agent_containment.governance_event import GovernanceEvent
 from agent_containment.warden_observation import WardenObservation
 
