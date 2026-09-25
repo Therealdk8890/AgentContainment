@@ -15,6 +15,7 @@ from typing import Mapping
 EVENT_TYPES = frozenset({
     "agent_registered",
     "authorization_decision",
+    "verification_evaluated",
     "containment_requested",
     "capability_revoked",
     "containment_enforced",
@@ -60,10 +61,7 @@ class GovernanceEvent:
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
-        if self.attributes is None:
-            value["attributes"] = {}
-        else:
-            value["attributes"] = dict(self.attributes)
+        value["attributes"] = {} if self.attributes is None else dict(self.attributes)
         return value
 
     def to_json(self) -> str:
