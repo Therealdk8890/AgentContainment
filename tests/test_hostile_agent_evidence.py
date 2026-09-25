@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+from pathlib import Path
 
-from demo.hostile_agent_demo import _write_evidence
+
+DEMO_PATH = Path(__file__).resolve().parents[1] / "demo" / "hostile_agent_demo.py"
+SPEC = importlib.util.spec_from_file_location("hostile_agent_demo", DEMO_PATH)
+assert SPEC is not None and SPEC.loader is not None
+DEMO = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(DEMO)
+_write_evidence = DEMO._write_evidence
 
 
 REQUIRED_TOP_LEVEL_KEYS = {
