@@ -35,6 +35,9 @@ jobs:
         run: PYTHONPATH=src python -m pytest -q tests/test_regression.py tests/test_regression_replay.py tests/test_epoch_fencing_adversarial.py
       - name: Verify adversarial epoch-fencing proof is part of the regression gate
         run: PYTHONPATH=src python -m pytest -q tests/test_epoch_fencing_adversarial.py
+      - name: Verify proof receipt integrity and adversarial tamper detection
+        run: PYTHONPATH=src python -m pytest -q tests/test_proof_receipt.py tests/test_containment_receipt_integration.py
+
       - name: Verify fixture files are valid JSON
         run: python -m json.tool tests/fixtures/regression/secret-exfiltration.json >/dev/null
 
