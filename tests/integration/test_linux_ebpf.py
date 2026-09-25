@@ -114,7 +114,6 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         )
         containment = ContainmentController(
             runtime,
-            process_containment=LinuxCgroupProcessContainment(group),
             enforcers=[enforcer],
         )
         runtime_service = ContainmentService(audit=audit)
