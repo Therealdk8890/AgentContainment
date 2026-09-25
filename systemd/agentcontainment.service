@@ -7,7 +7,7 @@ Before=agentcontainment-agent.service
 Type=simple
 User=agentcontainment
 Group=agentcontainment
-ExecStart=/usr/bin/python3 -m agent_containment.daemon --socket /run/agentcontainment/control.sock --socket-mode 0600 --cgroup-root /sys/fs/cgroup/agent-containment --controller-cgroup /sys/fs/cgroup/agent-containment-controller
+ExecStart=/usr/bin/python3 -m agent_containment.daemon --socket /run/agentcontainment/control.sock --socket-mode 0600 --cgroup-root auto
 RuntimeDirectory=agentcontainment
 RuntimeDirectoryMode=0700
 Restart=on-failure
@@ -19,6 +19,7 @@ ProtectSystem=strict
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=no
+Delegate=yes
 RestrictSUIDSGID=yes
 UMask=0077
 
