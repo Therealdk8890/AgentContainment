@@ -34,23 +34,34 @@ The target property is:
         +-------------------v-------------------+
         | Agent workload                        |
         | separate UID / cgroup / namespaces    |
-        |                                     |
+        |                                       |
         | untrusted agent + descendants         |
         +---------------------------------------+
 ```
 
 ### Current UID model
 
-The daemon currently **inherits the UID of the process that launches it**. AgentContainment does not yet force a dedicated service UID in Python itself.
+The systemd deployment now **does force a dedicated controller service identity**:
 
-That distinction matters:
+- `systemd/agentcontainment.service` runs as `User=agentcontainment` and `Group=agentcontainment`;
+- the example agent workload runs as the separate `agent` identity;
+- the controller and agent therefore do not share the same Unix service identity in the documented systemd deployment;
+- the daemon itself still does not hard-code a UID in Python. That is intentional: identity is a deployment boundary owned by the trusted service manager rather than an application-level assumption.
 
-- in a production deployment, the service manager should run `agentcontainmentd` as a dedicated controller UID/GID;
-- the agent workload should run as a different, less-privileged identity;
-- the controller's privileged UID should never be inferred from an agent-provided request;
-- development deployments that run both under the same UID do **not** establish the intended Unix permission boundary and must not be treated as isolation evidence.
+The dedicated `agentcontainment` system user/group must exist before the unit is started. The unit does not create accounts automatically.
 
-The daemon's privileged transport commands now fail closed when no UID allowlist is configured: the only implicit privileged identity is the daemon's own effective UID.
+For example, a host administrator can provision the identity with:
+
+```bash
+sudo groupadd --system agentcontainment
+sudo useradd --system --gid agentcontainment --no-create-home   --shell /usr/sbin/nologin agentcontainment
+```
+
+Then install/enable the unit through the normal systemd workflow.
+
+Development deployments that run the daemon and agent under the same UID do **not** establish the intended Unix permission boundary and must not be treated as isolation evidence.
+
+The daemon's privileged transport commands fail closed when no UID allowlist is configured: the only implicit privileged identity is the daemon's own effective UID.
 
 The controller must be outside the agent's trust boundary. The agent-facing
 IPC path, if one is required, must expose only the minimum operations needed
@@ -69,6 +80,10 @@ a diagram:
 - controller and agent occupy distinct cgroups;
 - controller-owned privileged commands fail closed when no explicit
   privileged-UID policy is supplied.
+
+The repository also contains regression tests that verify the systemd unit
+continues to specify a dedicated controller identity and the expected service
+hardening directives.
 
 These tests are evidence for the configured Linux deployment, not a universal
 claim about every container, namespace, or service-manager configuration.
@@ -99,6 +114,12 @@ service manager or equivalent trusted supervisor with:
 - restart policy independent of the agent;
 - minimal capabilities required to perform containment;
 - namespace and filesystem restrictions appropriate to the host deployment.
+
+The included systemd unit already establishes the dedicated UID/GID,
+controller-owned runtime directory, restrictive umask, filesystem protections,
+kernel protection settings, and `NoNewPrivileges=yes`. It deliberately leaves
+`ProtectControlGroups=no` because the controller may need to manage the
+cgroup hierarchy used for containment.
 
 The exact capability and namespace profile must be derived from the enforcement
 providers actually enabled. Over-restricting the controller can make
