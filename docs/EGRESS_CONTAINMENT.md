@@ -24,6 +24,27 @@ application code.
 6. Out-of-band forensics over local IPC such as a Unix domain socket. The
    controller owns external telemetry egress.
 
+## Linux eBPF proof
+
+The privileged integration test exercises the actual cgroup/eBPF boundary rather
+than only the Python egress gate:
+
+1. A raw Python socket connects to a local TCP listener before containment.
+2. The workload is placed in a dedicated cgroup.
+3. The controller attaches the eBPF cgroup_skb/egress program to that cgroup.
+4. The program returns 0 at the kernel egress hook, which means DROP for a
+   cgroup skb program.
+5. The same uncooperative workload attempts a second raw socket connection
+   after containment without consulting AgentContainment or its leases.
+6. The connection attempt fails and the listener receives no post-containment
+   connection.
+
+The test therefore distinguishes application-level lease invalidation from a
+host-enforced network decision. A successful run is evidence that the kernel
+hook blocked new egress from the protected cgroup on the tested Linux host and
+kernel; it is not a universal claim across kernels, network namespaces, or
+external enforcement layers.
+
 ## Abortive socket close
 
 hard_close_socket() configures SO_LINGER with a zero timeout where supported,
