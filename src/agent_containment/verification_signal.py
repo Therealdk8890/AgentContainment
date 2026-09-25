@@ -42,6 +42,21 @@ class VerificationSignal:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "VerificationSignal":
+        if not isinstance(value, Mapping):
+            raise ValueError("verification signal must be a mapping")
+
+        def required_string(key: str) -> str:
+            raw = value.get(key, "")
+            if not isinstance(raw, str) or not raw:
+                raise ValueError(f"{key} must be a non-empty string")
+            return raw
+
+        def non_negative_int(key: str, default: int = 0) -> int:
+            raw = value.get(key, default)
+            if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+                raise ValueError(f"{key} must be a non-negative integer")
+            return raw
+
         def strings(key: str) -> tuple[str, ...]:
             raw = value.get(key, ())
             if not isinstance(raw, (list, tuple)):
@@ -51,17 +66,17 @@ class VerificationSignal:
             return tuple(raw)
 
         return cls(
-            version=int(value.get("version", 1)),
-            disposition=str(value.get("disposition", "")),
-            report_fingerprint=str(value.get("reportFingerprint", "")),
-            policy_fingerprint=str(value.get("policyFingerprint", "")),
+            version=non_negative_int("version", 1),
+            disposition=required_string("disposition"),
+            report_fingerprint=required_string("reportFingerprint"),
+            policy_fingerprint=required_string("policyFingerprint"),
             blocking_claim_ids=strings("blockingClaimIDs"),
             review_claim_ids=strings("reviewClaimIDs"),
-            supported_claim_count=int(value.get("supportedClaimCount", 0)),
-            total_claim_count=int(value.get("totalClaimCount", 0)),
-            trace_id=value.get("traceID") if isinstance(value.get("traceID"), str) else None,
-            run_id=value.get("runID") if isinstance(value.get("runID"), str) else None,
-            action_id=value.get("actionID") if isinstance(value.get("actionID"), str) else None,
+            supported_claim_count=non_negative_int("supportedClaimCount"),
+            total_claim_count=non_negative_int("totalClaimCount"),
+            trace_id=value.get("traceID"),
+            run_id=value.get("runID"),
+            action_id=value.get("actionID"),
         )
 
 
