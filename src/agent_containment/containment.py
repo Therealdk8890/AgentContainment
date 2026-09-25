@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from time import monotonic
 from .credentials import CredentialStore
 from .enforcer import Enforcer, EnforcementStatus
 from .runtime import Runtime, RuntimeState
@@ -20,6 +21,16 @@ class ContainmentReport:
     failures: tuple[str, ...]
     persistence_failures: tuple[str, ...] = ()
     external_verified: bool = False
+    containment_requested_at: float | None = None
+    provider_applied_at: float | None = None
+    independently_verified_at: float | None = None
+
+    @property
+    def enforcement_latency_seconds(self) -> float | None:
+        """Elapsed time from containment request to independent verification."""
+        if self.containment_requested_at is None or self.independently_verified_at is None:
+            return None
+        return max(0.0, self.independently_verified_at - self.containment_requested_at)
 
     @property
     def complete(self) -> bool:
@@ -45,6 +56,9 @@ class ContainmentReport:
             failures=self.failures,
             persistence_failures=self.persistence_failures + (failure,),
             external_verified=self.external_verified,
+            containment_requested_at=self.containment_requested_at,
+            provider_applied_at=self.provider_applied_at,
+            independently_verified_at=self.independently_verified_at,
         )
 
 
@@ -69,6 +83,7 @@ class ContainmentController:
         self.runtime.halt()
 
     def contain(self) -> ContainmentReport:
+        containment_requested_at = monotonic()
         # Fence first. Once this returns, all previously issued application,
         # egress, and credential leases are stale even if later enforcement
         # stages fail.
@@ -101,6 +116,7 @@ class ContainmentController:
         if self.process_containment is not None:
             enforce("processes_contained", self.process_containment.contain)
 
+        provider_applied_at = None
         verified_enforcers = 0
         for enforcer in self.enforcers:
             provider = getattr(enforcer, "name", type(enforcer).__name__)
@@ -112,6 +128,7 @@ class ContainmentController:
                         + (f": {result.detail}" if result.detail else "")
                     )
                     continue
+                provider_applied_at = provider_applied_at or monotonic()
                 verification = enforcer.verify_contained(self.runtime.agent_id)
                 if verification.status is not EnforcementStatus.ENFORCED:
                     failures.append(
@@ -125,12 +142,16 @@ class ContainmentController:
             except Exception as exc:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
 
+        independently_verified_at = monotonic() if verified_enforcers == len(self.enforcers) and self.enforcers else None
         report = ContainmentReport(
             agent_id=self.runtime.agent_id,
             epoch=self.runtime.epoch,
             stages=tuple(stages),
             failures=tuple(failures),
             external_verified=bool(self.enforcers) and verified_enforcers == len(self.enforcers),
+            containment_requested_at=containment_requested_at,
+            provider_applied_at=provider_applied_at,
+            independently_verified_at=independently_verified_at,
         )
         self.last_report = report
         return report
