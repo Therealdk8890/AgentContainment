@@ -72,5 +72,14 @@ bypass = Action("rogue-demo", "bypass", "write", "prod-db", risk=1)
 decision = gateway.authorize(bypass)
 print(f"Post-containment: {decision.decision.value.upper()} — {decision.reason}")
 
-harness.assert_contained()
+# The download/upload prefix is expected to be allowed individually; the
+# dangerous sequence must be blocked and the runtime left contained.
+expected_allowed = {"download-file", "upload-file"}
+bypasses = [
+    r for r in harness.results
+    if not r.blocked and r.name not in expected_allowed
+]
+if bypasses:
+    names = ", ".join(r.name for r in bypasses)
+    raise AssertionError(f"containment bypasses detected: {names}")
 print("\nATTACK RESULT: CONTAINED")
