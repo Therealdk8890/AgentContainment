@@ -165,8 +165,20 @@ The agent must not have write access to:
 - the service-manager control interface.
 
 Startup should establish the agent's kernel safety floor before the agent is
-admitted. If the controller fails to start, the safe outcome is **no agent
-admission**, not an unrestricted workload.
+admitted. The included example systemd workload makes this explicit: it has a
+`Requires=agentcontainment.service` dependency, starts only after the
+controller, and runs an `ExecStartPre` check for the controller-owned Unix
+socket. If the controller fails to start or the socket is absent at admission,
+the workload is not started. `PartOf=agentcontainment.service` also propagates
+controller lifecycle changes to the example workload.
+
+This is a bootstrap/readiness floor, not proof that the controller's full
+enforcement policy is healthy. The socket check establishes that the controller
+has reached its transport-start phase; deployment-specific readiness checks
+should be added if a workload requires stronger controller health semantics.
+
+If the controller fails to start, the safe outcome is **no agent admission**,
+not an unrestricted workload.
 
 ## Enforcement latency
 
