@@ -138,3 +138,24 @@ def test_mapping_parser_rejects_present_optional_ids_with_wrong_type():
         pass
     else:
         raise AssertionError("expected invalid traceID to be rejected")
+
+
+
+def test_shared_v1_fixture_parses_as_verification_signal():
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "governance-verification-signal-v1.json"
+    signal = VerificationSignal.from_mapping(json.loads(fixture.read_text(encoding="utf-8")))
+
+    assert signal.version == 1
+    assert signal.disposition == "block"
+    assert signal.report_fingerprint == "report-123"
+    assert signal.policy_fingerprint == "policy-123"
+    assert signal.blocking_claim_ids == ("claim-unsafe",)
+    assert signal.review_claim_ids == ()
+    assert signal.supported_claim_count == 0
+    assert signal.total_claim_count == 1
+    assert signal.trace_id == "trace-1"
+    assert signal.run_id == "run-1"
+    assert signal.action_id == "action-1"
