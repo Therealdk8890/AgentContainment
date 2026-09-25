@@ -65,11 +65,19 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
     return result.returncode
 
 
-def _write_evidence(evidence: list[dict[str, object]], result: str) -> None:
+def _write_evidence(evidence: list[dict[str, object]], result: str | None = None) -> None:
+    derived_result = "contained" if all(
+        item.get("result") == "passed" and item.get("exit_code") == 0 for item in evidence
+    ) else "failed"
+    if result is not None and result != derived_result:
+        raise ValueError(
+            f"evidence result {result!r} is inconsistent with recorded test outcomes; "
+            f"expected {derived_result!r}"
+        )
     payload = {
         "schema_version": 1,
         "evidence_type": "hostile_agent_demo",
-        "result": result,
+        "result": derived_result,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "repository": os.environ.get("GITHUB_REPOSITORY"),
         "commit_sha": os.environ.get("GITHUB_SHA"),
