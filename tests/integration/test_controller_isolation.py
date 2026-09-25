@@ -84,10 +84,14 @@ def test_unprivileged_agent_cannot_interfere_with_controller():
             "agent_containment.linux_supervisor",
             fromlist=["LinuxCgroupSupervisor"],
         ).LinuxCgroupSupervisor
+        controller_cgroup_actual = LinuxCgroupSupervisor.pid_cgroup_path(daemon.pid)
         controller_membership = LinuxCgroupSupervisor.pid_in_cgroup(
             daemon.pid, controller_cgroup
         )
-        assert controller_membership is True
+        assert controller_membership is True, (
+            f"controller pid {daemon.pid} reported cgroup {controller_cgroup_actual!r}, "
+            f"expected {controller_cgroup!s}"
+        )
         assert os.stat(f"/proc/{daemon.pid}").st_uid == 0
 
         agent_code = r"""
