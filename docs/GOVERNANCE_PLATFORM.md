@@ -45,9 +45,42 @@ Optional `attributes` carry provider-specific details without changing the
 top-level contract.
 
 AgentContainment emits lifecycle events including authorization decisions,
-containment requests, capability revocation, enforcement, certification or
-verification failure, recovery requests/authorization/completion, and proof
-degradation.
+verification evaluation, review request/approval/escalation, containment
+requests, capability revocation, enforcement, certification or verification
+failure, recovery requests/authorization/completion, and proof degradation.
+
+### Review lifecycle
+
+A verifier disposition of `requireReview` maps to a controller-owned `PAUSE`.
+The paused action is not implicitly authorized. A review has an explicit
+deadline; expiry remains non-executable and never becomes `ALLOW`.
+Operators may approve a still-pending review through the controller boundary,
+or explicitly escalate a pending/expired review to `HALT` and containment.
+Retrying with another reviewer is a new review request rather than an implicit
+extension of an expired authorization.
+
+### Certification boundary
+
+Containment has four distinct facts that must not be collapsed into one
+boolean:
+
+```text
+FENCE_PREPARED → RUNTIME_CONTAINED → EXTERNALLY_VERIFIED → CERTIFIED
+```
+
+A successful controller fence establishes local containment state. It does not
+by itself certify external enforcement. Certification requires every configured
+external enforcer to report `ENFORCED` and independently verify the contained
+state. A controller with no external enforcement provider may still be safely
+contained, but its report is not certification evidence.
+
+### Safety/evidence sequencing
+
+The controller establishes the durable containment fence before the runtime
+transition. After containment, it persists the minimal incident fact in its own
+registry. Rich provenance, audit delivery, and regression materialization are
+downstream. Therefore evidence/provenance failure can degrade proof without
+turning a contained runtime back into an executable one.
 
 ### Authority boundary
 
