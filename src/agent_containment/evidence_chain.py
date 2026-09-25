@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Mapping
 
 
 SCHEMA = "agent-containment/evidence-chain/v1"
@@ -110,6 +110,8 @@ class IncidentEvidenceChain:
             raise ValueError("timestamp must be non-negative")
         if containment_epoch is not None and containment_epoch < 0:
             raise ValueError("containment_epoch must be non-negative")
+        if any(node.event_id == event_id for node in self._nodes):
+            raise ValueError(f"duplicate evidence event_id: {event_id}")
 
         sequence = len(self._nodes)
         previous_hash = self.head_hash
@@ -143,9 +145,13 @@ class IncidentEvidenceChain:
     def verify(self) -> None:
         """Raise ValueError if the chain has been mutated, reordered, or broken."""
         previous = GENESIS
+        seen_ids: set[str] = set()
         for expected_sequence, node in enumerate(self._nodes):
             if node.sequence != expected_sequence:
                 raise ValueError("evidence sequence is not contiguous")
+            if node.event_id in seen_ids:
+                raise ValueError(f"duplicate evidence event_id: {node.event_id}")
+            seen_ids.add(node.event_id)
             if node.previous_hash != previous:
                 raise ValueError(f"evidence link broken at sequence {node.sequence}")
             expected_hash = _node_hash(
