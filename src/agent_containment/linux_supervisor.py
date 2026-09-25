@@ -44,9 +44,11 @@ class LinuxCgroupSupervisor:
         if not status.is_file():
             raise ProcessLookupError(pid)
         for line in status.read_text().splitlines():
-            hierarchy, separator, path = line.partition(":")
-            if hierarchy == "0" and separator == ":" and path:
-                return path
+            fields = line.split(":", 2)
+            if len(fields) == 3:
+                hierarchy, _controllers, path = fields
+                if hierarchy == "0" and path:
+                    return path
         raise RuntimeError(f"process {pid} has no cgroup v2 membership")
 
     @classmethod
