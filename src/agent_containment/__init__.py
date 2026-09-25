@@ -1,3 +1,4 @@
+from .bootstrap import BootstrapAdmissionError, require_controller_available
 from .control import ContainmentService, ManagedAgent, RecoveryAuthorization
 from .cgroup_enforcer import CgroupV2Enforcer
 from .cilium_enforcer import CiliumNetworkPolicyEnforcer
@@ -14,6 +15,7 @@ from .warden_observation import WardenObservation
 
 __all__ = [
     "Action", "ActionGateway", "Decision", "DecisionType",
+    "BootstrapAdmissionError", "require_controller_available",
     "ContainmentService", "ManagedAgent", "RecoveryAuthorization",
     "IncidentRecord", "IncidentRegistry", "IncidentState", "GovernanceEvent",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
