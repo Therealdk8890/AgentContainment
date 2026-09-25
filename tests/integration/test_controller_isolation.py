@@ -170,10 +170,7 @@ if results != {
 """
         # signal is referenced inside the agent snippet; keep the snippet
         # self-contained rather than inheriting test globals.
-        agent_code = agent_code.replace("import errno
-", "import errno
-import signal
-")
+        
         result = _run_as_nobody(
             agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup), str(controller_cgroup), cgroup_path=agent_cgroup
         )
