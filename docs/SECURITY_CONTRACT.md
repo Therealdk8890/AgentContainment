@@ -65,3 +65,50 @@ No feature should be described as a security guarantee merely because the agent 
 - reproducible hostile-agent demonstration covering the complete lifecycle
 
 This document is a security contract and test roadmap, not a claim of formal verification.
+
+
+## Recovery evidence contract
+
+Recovery is a transaction, not a state flip.
+
+The controller records the recovery lifecycle in a `RecoveryReport` before exposing the result as evidence. A supported recovery transaction records:
+
+```
+recovery_requested
+  -> external_release_verified
+  -> runtime_recovery_complete
+```
+
+If external release succeeds but runtime recovery fails, the controller MUST recontain the external enforcement before returning the failure:
+
+```
+recovery_requested
+  -> external_release_verified
+  -> runtime_recovery_failed
+  -> recontainment_verified
+```
+
+If compensation itself cannot be verified, the report is marked **degraded**. The runtime remains contained whenever the fail-closed compensation path succeeds.
+
+Recovery evidence distinguishes:
+
+- **runtime recovery** — the controller successfully transitions its runtime epoch from contained to active;
+- **external enforcement recovery** — external providers were released and independently verified;
+- **full workload rehydration** — restoration of credentials, capabilities, processes, or other external state. This is **not implemented by the v0.1 recovery primitive** and must not be implied by a successful runtime recovery.
+
+Recovery reports can be serialized into authenticated proof receipts. The receipt records the observed event sequence, contained and recovered epochs, failures, recontainment failures, recovery result, and proof status.
+
+### Receipt trust model
+
+The v0.1 receipt primitive uses HMAC-SHA-256 over a canonical JSON payload.
+
+This provides **tamper-evidence/authentication** to a verifier that possesses the shared secret. It does **not** provide:
+
+- asymmetric non-repudiation;
+- proof independent of the trusted receipt issuer;
+- universal replay detection across independent verifier instances;
+- immutable storage.
+
+A cryptographically valid receipt therefore means that the holder of the verification secret authenticated the recorded payload. It does not, by itself, establish that every underlying kernel, provider, or external-world claim was true.
+
+Stronger asymmetric signing and external evidence anchoring are future hardening work.
