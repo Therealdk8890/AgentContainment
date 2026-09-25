@@ -5,14 +5,43 @@ import os
 from pathlib import Path
 
 
+CGROUP2_ROOT = Path("/sys/fs/cgroup")
+
+
 class LinuxCgroupSupervisor:
     """Create and manage a dedicated cgroup v2 for one agent workload."""
 
-    def __init__(self, root: str | os.PathLike[str] = "/sys/fs/cgroup/agent-containment"):
-        if os.name != "posix" or not Path("/sys/fs/cgroup/cgroup.controllers").exists():
+    def __init__(
+        self,
+        root: str | os.PathLike[str] = "/sys/fs/cgroup/agent-containment",
+    ):
+        if os.name != "posix" or not (CGROUP2_ROOT / "cgroup.controllers").exists():
             raise RuntimeError("Linux cgroup v2 is required")
+        if str(root) == "auto":
+            root = self._delegated_root()
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _delegated_root() -> Path:
+        """Return a child root inside the controller's systemd cgroup.
+
+        systemd Delegate=yes grants the non-root controller ownership of its
+        service cgroup and permits it to create/manage a subtree beneath it.
+        Derive the path from the kernel's process cgroup membership instead of
+        hard-coding a slice or unit path.
+        """
+        status = Path("/proc/self/cgroup")
+        if not status.is_file():
+            raise RuntimeError("cannot determine controller cgroup")
+        for line in status.read_text(encoding="utf-8").splitlines():
+            fields = line.split(":", 2)
+            if len(fields) == 3 and fields[0] == "0" and fields[2]:
+                service_cgroup = (CGROUP2_ROOT / fields[2].lstrip("/")).resolve()
+                if service_cgroup == CGROUP2_ROOT or CGROUP2_ROOT not in service_cgroup.parents:
+                    raise RuntimeError("controller cgroup is outside cgroup v2 root")
+                return service_cgroup / "agents"
+        raise RuntimeError("process has no cgroup v2 membership")
 
     def create_agent(self, agent_id: str) -> Path:
         path = self.root / self._safe_name(agent_id)
