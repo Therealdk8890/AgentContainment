@@ -43,6 +43,16 @@ def test_protocol_register_status_and_contain(tmp_path):
         server.close()
 
 
+
+def test_privileged_commands_fail_closed_without_uid_configuration():
+    server = UnixControlServer(ContainmentService(), "/tmp/agent-containment-test.sock")
+    response = server.handle(
+        {"command": "contain", "agent_id": "agent-1"},
+        peer_uid=os.getuid(),
+    )
+    assert response["ok"] is False
+    assert response["error"] == "forbidden_command"
+
 def test_protocol_rejects_bad_request():
     server = UnixControlServer(ContainmentService(), "/tmp/agent-containment-test.sock")
     response = server.handle(["not", "an", "object"])
