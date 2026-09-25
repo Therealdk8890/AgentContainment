@@ -36,6 +36,9 @@ class VerificationSignal:
             raise ValueError("claim counts must be non-negative")
         if self.supported_claim_count > self.total_claim_count:
             raise ValueError("supported claim count cannot exceed total claim count")
+        for name, value in (("trace_id", self.trace_id), ("run_id", self.run_id), ("action_id", self.action_id)):
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(f"{name} must be non-empty when provided")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "VerificationSignal":
@@ -62,10 +65,7 @@ class VerificationSignal:
         )
 
 
-def decision_from_verification(
-    action: Action,
-    signal: VerificationSignal,
-) -> Decision:
+def decision_from_verification(action: Action, signal: VerificationSignal) -> Decision:
     """Convert a verifier signal into a controller-owned policy decision."""
     if signal.action_id is not None and signal.action_id != action.action_id:
         return Decision(
@@ -76,7 +76,7 @@ def decision_from_verification(
     if signal.disposition == "block":
         return Decision(
             action.action_id,
-            DecisionType.HENALT if False else DecisionType.HALT,
+            DecisionType.HALT,
             "claim verification blocked publication or execution",
         )
     if signal.disposition == "requireReview":
