@@ -2,7 +2,7 @@ import json
 import subprocess
 
 from agent_containment.cilium_enforcer import CiliumNetworkPolicyEnforcer
-from agent_containment.enforcer import EnforcementStatus
+from agent_containment.enforcer import EnforcementResult, EnforcementStatus
 
 
 class FakeKubectl:
@@ -119,7 +119,7 @@ def test_datapath_verifier_can_certify_realized_enforcement():
 
     def verifier(identity):
         calls.append(identity.name)
-        return __import__("agent_containment.enforcer", fromlist=["EnforcementResult"]).EnforcementResult(
+        return EnforcementResult(
             "datapath", EnforcementStatus.ENFORCED
         )
 
@@ -138,7 +138,7 @@ def test_datapath_verifier_failure_does_not_certify_policy():
     kubectl = FakeKubectl()
 
     def verifier(identity):
-        return __import__("agent_containment.enforcer", fromlist=["EnforcementResult"]).EnforcementResult(
+        return EnforcementResult(
             "datapath",
             EnforcementStatus.VERIFICATION_FAILED,
             "endpoint policy not realized",
