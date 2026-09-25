@@ -43,7 +43,7 @@ TESTS = [
 
 
 def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
-    print(f"\\n=== {label.upper()} ===")
+    print(f"\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
     started = time.monotonic()
     result = subprocess.run(
@@ -120,11 +120,12 @@ def main() -> int:
     print("The agent is treated as hostile. The controller remains trusted.")
     print("The demo uses temporary test resources and cleans them up.")
 
+    evidence: list[dict[str, object]] = []
     failures = 0
     for label, path in TESTS:
-        failures += _run(label, path)
+        failures += _run(label, path, evidence)
 
-    print("\\n=== ATTACK MATRIX ===")
+    print("\n=== ATTACK MATRIX ===")
     print("controller SIGTERM/SIGKILL      -> denied")
     print("controller ptrace/memory       -> denied")
     print("controller IPC/socket tamper   -> denied")
