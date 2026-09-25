@@ -400,6 +400,48 @@ The repository contains:
 
 Privileged tests are opt-in and intended for isolated Linux environments.
 
+
+## Hostile-agent demonstration
+
+The repository includes a real Linux adversarial demonstration runner. It does not simulate the host boundary: it invokes the privileged integration proofs against temporary cgroup/eBPF resources and expects the hostile workload to be denied or contained.
+
+Run it in an isolated Linux environment as root after building the eBPF artifacts:
+
+~~~bash
+bash scripts/build_ebpf.sh
+AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 python demo/hostile_agent_demo.py
+~~~
+
+The demonstration exercises these concrete attacks and boundaries:
+
+| Hostile action | Expected result |
+|---|---|
+| Kill the controller with SIGTERM/SIGKILL | Denied |
+| ptrace/read controller state | Denied |
+| Tamper with controller IPC | Denied |
+| Migrate a workload across the cgroup boundary | Denied |
+| Kill the contained workload | Enforced |
+| Reconnect after kernel egress containment | Denied |
+| Reuse a stale execution lease | Invalidated |
+
+The runner is intentionally fail-closed: if any selected adversarial proof fails, the demonstration exits non-zero.
+
+This is demonstration and regression evidence on the tested Linux host. It is not a universal security guarantee, formal verification, or cryptographic attestation of the host.
+
+## Proof receipts and recovery evidence
+
+Containment and recovery reports can be serialized as authenticated proof receipts. The v0.1 receipt primitive uses HMAC-SHA-256 over canonical JSON, making the recorded payload tamper-evident to a verifier holding the shared secret.
+
+Recovery evidence distinguishes:
+
+- **runtime recovery** — the controller transitions a contained runtime back to active;
+- **external enforcement recovery** — external providers are released and independently verified;
+- **full workload rehydration** — restoration of credentials, capabilities, processes, or other external state, which is not implemented by the v0.1 recovery primitive.
+
+HMAC receipts do **not** provide asymmetric non-repudiation, universal replay detection across independent verifiers, immutable storage, or proof that an underlying kernel/provider claim was true merely because the receipt verifies.
+
+See docs/SECURITY_CONTRACT.md for the current recovery evidence contract and trust model.
+
 ## Repository layout
 
 - src/agent_containment/ — core library and controller components
