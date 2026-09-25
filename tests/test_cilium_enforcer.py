@@ -15,6 +15,12 @@ class FakeKubectl:
         if args[:1] == ["apply"]:
             self.policy = json.loads(stdin)
             return subprocess.CompletedProcess(args, 0, stdout="configured\n", stderr="")
+        if args[:2] == ["get", "ciliumendpoints"]:
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=json.dumps({"items": [{"status": {"policy": {"realized": {"policy-enabled": "both"}}}]}),
+                stderr="",
+            )
         if args[:1] == ["get"]:
             if self.policy is None:
                 return subprocess.CompletedProcess(
@@ -113,7 +119,7 @@ def test_apply_failure_is_degraded():
     assert "forbidden" in result.detail
 
 
-def test_datapath_verifier_can_certify_realized_enforcement():
+def test_custom_datapath_verifier_can_certify_realized_enforcement():
     kubectl = FakeKubectl()
     calls = []
 
@@ -134,7 +140,7 @@ def test_datapath_verifier_can_certify_realized_enforcement():
     assert calls == [enforcer._identities["agent-1"].name]
 
 
-def test_datapath_verifier_failure_does_not_certify_policy():
+def test_custom_datapath_verifier_failure_does_not_certify_policy():
     kubectl = FakeKubectl()
 
     def verifier(identity):
