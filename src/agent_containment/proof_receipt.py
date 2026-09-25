@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,10 +38,12 @@ class ProofReceipt:
         if not isinstance(secret, bytes) or not secret:
             raise ValueError("receipt signing secret must be non-empty bytes")
 
+        payload = dict(payload)
+        payload.setdefault("receipt_id", str(uuid.uuid4()))
         canonical = _canonical(payload)
         digest = hashlib.sha256(canonical).hexdigest()
         signature = hmac.new(secret, canonical, hashlib.sha256).hexdigest()
-        return cls(dict(payload), digest, signature)
+        return cls(payload, digest, signature)
 
     def verify(self, secret: bytes) -> bool:
         if not isinstance(secret, bytes) or not secret:
