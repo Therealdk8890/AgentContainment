@@ -237,8 +237,14 @@ class UnixControlServer:
         return metadata
 
     def _require_privileged(self, uid: int | None) -> None:
+        # Fail closed when no privileged UID policy was configured. The
+        # controller must never accidentally expose register/contain authority
+        # to every local peer merely because the daemon was started without
+        # optional ACL flags.
         allowed = self.privileged_uids if self.privileged_uids is not None else self.allowed_uids
-        if allowed is not None and (uid is None or uid not in allowed):
+        if allowed is None:
+            allowed = {os.geteuid()}
+        if uid is None or uid not in allowed:
             raise ControlProtocolError("forbidden_command")
 
     def _peer_credentials(self, conn: socket.socket) -> tuple[int | None, int | None]:
