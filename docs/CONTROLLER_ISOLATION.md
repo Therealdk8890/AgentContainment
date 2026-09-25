@@ -39,6 +39,19 @@ The target property is:
         +---------------------------------------+
 ```
 
+### Current UID model
+
+The daemon currently **inherits the UID of the process that launches it**. AgentContainment does not yet force a dedicated service UID in Python itself.
+
+That distinction matters:
+
+- in a production deployment, the service manager should run `agentcontainmentd` as a dedicated controller UID/GID;
+- the agent workload should run as a different, less-privileged identity;
+- the controller's privileged UID should never be inferred from an agent-provided request;
+- development deployments that run both under the same UID do **not** establish the intended Unix permission boundary and must not be treated as isolation evidence.
+
+The daemon's privileged transport commands now fail closed when no UID allowlist is configured: the only implicit privileged identity is the daemon's own effective UID.
+
 The controller must be outside the agent's trust boundary. The agent-facing
 IPC path, if one is required, must expose only the minimum operations needed
 by the workload and must authenticate the peer independently of application
@@ -102,6 +115,71 @@ operations through already constrained mechanisms.
 
 This means controller failure should not silently convert into unrestricted
 agent capability.
+
+## Bootstrap boundary
+
+Runtime isolation is insufficient if an attacker can prevent the controller from
+starting or replace what the trusted supervisor starts.
+
+A production deployment therefore needs a bootstrap chain such as:
+
+```text
+trusted host / image
+      ↓
+service-manager policy
+      ↓
+controller binary + configuration
+      ↓
+controller process
+      ↓
+agent admission
+```
+
+The agent must not have write access to:
+
+- the controller executable or Python environment;
+- the controller configuration and service definition;
+- the controller socket directory;
+- the controller's service UID/GID;
+- the service-manager control interface.
+
+Startup should establish the agent's kernel safety floor before the agent is
+admitted. If the controller fails to start, the safe outcome is **no agent
+admission**, not an unrestricted workload.
+
+## Enforcement latency
+
+Controller survivability and enforcement latency are separate security
+properties.
+
+For every enforcement provider, measure:
+
+```text
+AUTHORIZE/HALT decision
+        ↓
+containment request
+        ↓
+provider boundary applied
+        ↓
+independent observation
+        ↓
+effective enforcement
+```
+
+The measured interval must be provider-specific. cgroup-based process
+termination and freezing can be kernel-synchronous at the relevant boundary;
+network policy systems that require control-plane propagation can introduce a
+window.
+
+The real-host proof must therefore record or bound:
+
+- decision timestamp;
+- containment request timestamp;
+- provider application timestamp where available;
+- independent enforcement-observation timestamp;
+- whether the agent completed the protected action during the interval.
+
+Do not describe a policy as "enforced" merely because AUTHORIZE returned HALT.
 
 ## Security questions
 
