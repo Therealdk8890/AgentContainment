@@ -239,5 +239,5 @@ It is:
 > decisions take effect.**
 \nThe controller's cgroup authority is also delegated explicitly by systemd. The service unit uses `Delegate=yes` and starts the daemon with `--cgroup-root auto`. The daemon derives its cgroup v2 path from `/proc/self/cgroup` and creates an `agents/` subtree beneath its own delegated service cgroup. This avoids requiring the controller to be root while avoiding a hard-coded `/sys/fs/cgroup` directory that an unprivileged service would not own.
 
-The controller unit no longer creates or moves itself into a sibling cgroup. Its systemd service cgroup is the control-plane boundary; workload cgroups are children of that delegated boundary. Linux cgroup v2 delegation permits a non-root delegatee to create and manage a subtree while preventing it from moving processes across the delegation boundary. citeturn0search1turn0search0
+The controller unit no longer creates or moves itself into a sibling cgroup. Its systemd service cgroup is the control-plane boundary; workload cgroups are children of that delegated boundary. Linux cgroup v2 delegation permits a non-root delegatee to create and manage a subtree while preventing it from moving processes across the delegation boundary.
 
