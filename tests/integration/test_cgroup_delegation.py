@@ -79,6 +79,14 @@ if not supervisor.pid_in_cgroup(workload.pid, agent):
 if not supervisor.is_populated(agent):
     raise SystemExit("delegated child cgroup is not populated")
 
+outside_pid = int(sys.argv[3])
+try:
+    supervisor.attach_pid(agent, outside_pid)
+except PermissionError:
+    pass
+else:
+    raise SystemExit("delegated controller crossed its cgroup boundary")
+
 supervisor.contain(agent)
 
 try:
@@ -108,16 +116,7 @@ marker.write_text("passed", encoding="utf-8")
         outside_pid = outside_process.pid
         (outside / "cgroup.procs").write_text(f"{outside_pid}\n")
 
-        child_code += r"""
-outside_pid = int(sys.argv[3])
-try:
-    supervisor.attach_pid(agent, outside_pid)
-except PermissionError:
-    pass
-else:
-    raise SystemExit("delegated controller crossed its cgroup boundary")
-"""
-        child = subprocess.Popen(
+                child = subprocess.Popen(
             [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid)],
 
             stdin=subprocess.DEVNULL,
