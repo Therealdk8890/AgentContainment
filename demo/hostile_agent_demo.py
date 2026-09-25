@@ -92,13 +92,41 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
         },
         "tests": evidence,
         "attack_matrix": [
-            {"attack": "controller_signal", "expected": "denied"},
-            {"attack": "controller_ptrace_memory", "expected": "denied"},
-            {"attack": "controller_ipc_tamper", "expected": "denied"},
-            {"attack": "cross_boundary_cgroup_migrate", "expected": "denied"},
-            {"attack": "cgroup_workload_containment", "expected": "enforced"},
-            {"attack": "post_containment_egress", "expected": "denied"},
-            {"attack": "stale_execution_lease", "expected": "invalidated"},
+            {
+                "attack": "controller_signal",
+                "expected": "denied",
+                "test_path": "tests/integration/test_controller_isolation.py",
+            },
+            {
+                "attack": "controller_ptrace_memory",
+                "expected": "denied",
+                "test_path": "tests/integration/test_controller_isolation.py",
+            },
+            {
+                "attack": "controller_ipc_tamper",
+                "expected": "denied",
+                "test_path": "tests/integration/test_controller_isolation.py",
+            },
+            {
+                "attack": "cross_boundary_cgroup_migrate",
+                "expected": "denied",
+                "test_path": "tests/integration/test_cgroup_delegation.py",
+            },
+            {
+                "attack": "cgroup_workload_containment",
+                "expected": "enforced",
+                "test_path": "tests/integration/test_linux_ebpf.py",
+            },
+            {
+                "attack": "post_containment_egress",
+                "expected": "denied",
+                "test_path": "tests/integration/test_linux_ebpf.py",
+            },
+            {
+                "attack": "stale_execution_lease",
+                "expected": "invalidated",
+                "test_path": "tests/test_epoch_fencing_adversarial.py",
+            },
         ],
         "claims": {
             "scope": "test evidence from temporary resources on the tested Linux host",
