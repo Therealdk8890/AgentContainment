@@ -65,6 +65,48 @@ export incidents as `RegressionFixture` cases. Downstream provenance and
 claim-verification systems can attach evidence and support decisions without
 becoming the containment or recovery authority.
 
+
+
+## Why this is interesting
+
+This project is deliberately trying to solve a harder problem than **“put guardrails around the agent.”**
+
+The interesting boundary is what happens when the agent itself is no longer trustworthy.
+
+An agent can request an action. A verification layer can determine whether the supporting claim is acceptable. A controller can make the authorization decision. An external mechanism can enforce containment at the host or network boundary. Independent evidence can then show what actually happened.
+
+That gives the stack a concrete chain:
+
+```text
+ACTION
+  ↓
+CLAIM VERIFICATION
+  ↓
+AUTHORIZATION
+  ↓
+EXTERNAL ENFORCEMENT
+  ↓
+INDEPENDENT VERIFICATION
+  ↓
+PROVENANCE / EVIDENCE
+  ↓
+WARDEN OBSERVATION
+```
+
+The important part is that **no step is allowed to quietly impersonate another step**.
+
+- **ClaimProofKit** answers: *Is the action supported by acceptable claims?*
+- **AgentContainment** answers: *Was the action authorized, and what happens when containment is required?*
+- **The external enforcer** answers: *Was the boundary actually applied?*
+- **DProvenanceKit** answers: *Can the decision and resulting state be reconstructed and proved?*
+- **Warden** answers: *Can an operator see the chain without being given authority to change it?*
+
+Milestone 7 also moved the project beyond a purely simulated enforcement story: the trusted CI path exercises the Linux/eBPF containment boundary on a real Linux host and independently verifies the pinned enforcement link and post-containment behavior.
+
+That does **not** make the system production-ready. It makes the engineering question more interesting: the project is now testing the boundary between an agent's intent, a controller's authority, an external enforcement mechanism, and independently reconstructable evidence.
+
+> **Don't ask the agent to obey the boundary. Put the boundary outside the agent — then prove the boundary was actually enforced.**
+
 ## Core model
 
 `Detect → Prove → Halt → Contain → Map → Recover`
@@ -251,7 +293,7 @@ The provider-neutral observation contract is implemented by `WardenObservation`.
 
 ## Status
 
-**Early research/prototype.** The project is currently focused on deterministic authorization, stateful action policy, runtime fencing, provider-neutral enforcement verification, containment, child-agent propagation, OS-level Linux enforcement, incident evidence, and optional Cilium network enforcement. Cilium/Tetragon remain optional integrations rather than core dependencies.
+**Early research/prototype, with real-host enforcement proof established for the current Linux/eBPF path.** The project is currently focused on deterministic authorization, stateful action policy, runtime fencing, provider-neutral enforcement verification, containment, child-agent propagation, OS-level Linux enforcement, incident evidence, and the Milestone 8 observation boundary. Cilium/Tetragon remain optional integrations rather than core dependencies.
 
 The project should not yet be treated as a production security boundary without validating the host deployment, privilege model, identity binding, policy coverage, and kernel enforcement configuration.
 
