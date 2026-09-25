@@ -12,6 +12,7 @@ from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .provenance import InMemoryProvenanceSink, ProvenanceEmitter, ProvenanceRecord, ProvenanceSink, provenance_record
 from .regression import RegressionFixture, RegressionFixtureBuilder, assert_regression
+from .regression_replay import RegressionReplayResult, assert_fixture_replays, replay_fixture
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 from .warden_observation import WardenObservation
 
@@ -22,6 +23,7 @@ __all__ = [
     "IncidentRecord", "IncidentRegistry", "IncidentState", "GovernanceEvent",
     "ProvenanceRecord", "ProvenanceSink", "ProvenanceEmitter", "InMemoryProvenanceSink", "provenance_record",
     "RegressionFixture", "RegressionFixtureBuilder", "assert_regression",
+    "RegressionReplayResult", "replay_fixture", "assert_fixture_replays",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
