@@ -1,4 +1,8 @@
-/* Drop all egress traffic from the cgroup this program is attached to.
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
+
+/*
+ * Drop all egress traffic from the cgroup this program is attached to.
  *
  * For cgroup_skb programs, a return value of 0 means DROP and 1 means
  * ALLOW. The controller attaches this program only when containment is
