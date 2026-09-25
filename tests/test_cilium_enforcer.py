@@ -17,21 +17,8 @@ class FakeKubectl:
             return subprocess.CompletedProcess(args, 0, stdout="configured\n", stderr="")
         if args[:2] == ["get", "ciliumendpoints"]:
             return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=json.dumps(
-                    {
-                        "items": [
-                            {
-                                "status": {
-                                    "policy": {
-                                        "realized": {"policy-enabled": "both"}
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                ),
+                args, 0,
+                stdout=json.dumps({"items": [{"status": {"policy": {"realized": {"policy-enabled": "both"}}}}]}),
                 stderr="",
             )
         if args[:1] == ["get"]:
@@ -179,31 +166,27 @@ def test_cilium_endpoint_realization_failure_blocks_certification():
     kubectl = FakeKubectl()
 
     original = kubectl.__call__
-
     def endpoint_not_ready(args, stdin=None):
         if args[:2] == ["get", "ciliumendpoints"]:
             return subprocess.CompletedProcess(
                 args,
                 0,
-                stdout=json.dumps(
-                    {
-                        "items": [
-                            {
-                                "status": {
-                                    "policy": {
-                                        "realized": {"policy-enabled": "egress"}
-                                    }
-                                }
+                stdout=json.dumps({
+                    "items": [{
+                        "status": {
+                            "policy": {
+                                "realized": {"policy-enabled": "egress"}
                             }
-                        ]
-                    }
-                ),
+                        }
+                    }]
+                }),
                 stderr="",
             )
         return original(args, stdin)
 
     enforcer = CiliumNetworkPolicyEnforcer(
-        {"agent-1": {"app": "agent-1"}}, kubectl=endpoint_not_ready
+        {"agent-1": {"app": "agent-1"}},
+        kubectl=endpoint_not_ready,
     )
     enforcer.contain("agent-1")
     result = enforcer.verify_contained("agent-1")

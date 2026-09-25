@@ -6,12 +6,11 @@ from .governance_event import GovernanceEvent
 from .enforcer import Enforcer, EnforcementResult, EnforcementStatus, NoopEnforcer
 from .gateway import ActionGateway
 from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
+from .governance_event import GovernanceEvent
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
-from .regression import RegressionFixture
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
-from .verification_signal import VerificationSignal, decision_from_verification
 
 __all__ = [
     "Action", "ActionGateway", "Decision", "DecisionType",
@@ -20,6 +19,5 @@ __all__ = [
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
-    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "RegressionFixture",
-    "VerificationSignal", "decision_from_verification",
+    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "GovernanceEvent",
 ]
