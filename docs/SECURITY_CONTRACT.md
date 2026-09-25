@@ -55,8 +55,11 @@ No feature should be described as a security guarantee merely because the agent 
 
 ## Next proof milestones
 
-- stale-epoch authority rejection
-- host-enforced egress denial
+- stale-epoch authority rejection — **implemented and adversarially tested**
+  - old execution leases are rejected after containment and recovery epoch transitions
+- host-enforced egress denial — **implemented and adversarially tested**
+  - privileged CI observes a raw socket succeed before containment and fail after the controller attaches the cgroup/eBPF egress blocker
+  - the listener receives no post-containment connection, separating kernel enforcement from application cooperation
 - partial-failure recovery
 - proof receipt integrity/tamper detection
 - reproducible hostile-agent demonstration covering the complete lifecycle
