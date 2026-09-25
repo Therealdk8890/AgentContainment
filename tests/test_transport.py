@@ -270,3 +270,13 @@ def test_register_rejects_invalid_workload_pid_without_registration(tmp_path):
         )
 
     assert service.snapshot() == {}
+
+
+def test_privileged_commands_fail_closed_without_uid_configuration(tmp_path):
+    path = tmp_path / "controller.sock"
+    server = UnixControlServer(ContainmentService(), path)
+    with pytest.raises(ControlProtocolError, match="forbidden_command"):
+        server.handle(
+            {"command": "contain", "agent_id": "agent-1"},
+            peer_uid=os.getuid() + 1,
+        )
