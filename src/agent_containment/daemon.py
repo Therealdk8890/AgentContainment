@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import threading
 
@@ -13,10 +14,11 @@ from .transport import UnixControlServer
 def main() -> int:
     parser = argparse.ArgumentParser(description="AgentContainment action enforcement daemon")
     parser.add_argument("--socket", default="/run/agentcontainment/control.sock")
-    parser.add_argument("--socket-mode", default="0660")
+    parser.add_argument("--socket-mode", default="0600")
     parser.add_argument("--allowed-uid", action="append", type=int)
     parser.add_argument("--privileged-uid", action="append", type=int)
     parser.add_argument("--cgroup-root", default="/sys/fs/cgroup/agent-containment")
+    parser.add_argument("--controller-cgroup", help="Optional dedicated cgroup path for the controller daemon itself.")
     args = parser.parse_args()
 
     supervisor = LinuxCgroupSupervisor(args.cgroup_root)
@@ -37,6 +39,11 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
+    if args.controller_cgroup:
+        controller_cgroup = LinuxCgroupSupervisor(args.controller_cgroup)
+        controller_cgroup.root.mkdir(parents=True, exist_ok=True)
+        LinuxCgroupSupervisor.attach_pid(controller_cgroup.root, os.getpid())
+
     server.start()
     try:
         server.serve_forever(stop_event=stop)
