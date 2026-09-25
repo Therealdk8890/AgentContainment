@@ -23,19 +23,27 @@ def _wait_for_socket(path: Path, timeout: float = 5.0) -> None:
     raise AssertionError(f"timed out waiting for controller socket: {path}")
 
 
-def _run_as_nobody(code: str, *args: str, cgroup_path: Path) -> subprocess.CompletedProcess[str]:
+def _wait_for_file(path: Path, timeout: float = 5.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for file: {path}")
+
+
+def _run_as_nobody(code: str, *args: str) -> subprocess.Popen[str]:
     nobody = 65534
 
-    def drop_identity_and_join_cgroup() -> None:
-        (cgroup_path / "cgroup.procs").write_text(f"{os.getpid()}\n")
+    def drop_identity() -> None:
         os.setuid(nobody)
 
-    return subprocess.run(
+    return subprocess.Popen(
         [sys.executable, "-c", code, *args],
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        preexec_fn=drop_identity_and_join_cgroup,
-        check=False,
+        preexec_fn=drop_identity,
     )
 
 
@@ -53,10 +61,12 @@ def test_unprivileged_agent_cannot_interfere_with_controller():
 
     marker = Path(f"/tmp/agent-containment-isolation-{os.getpid()}")
     socket_path = marker / "control.sock"
+    agent_ready = marker / "agent-ready"
     controller_cgroup = root / f"agent-containment-controller-{os.getpid()}"
     agent_cgroup = root / f"agent-containment-agent-{os.getpid()}"
     marker.mkdir()
     daemon = None
+    agent = None
 
     try:
         controller_cgroup.mkdir()
@@ -101,13 +111,14 @@ import os
 import signal
 import socket
 import sys
+import time
 
 controller_pid = int(sys.argv[1])
 socket_path = sys.argv[2]
-agent_cgroup = sys.argv[3]
+ready_path = sys.argv[3]
 
-with open(agent_cgroup + "/cgroup.procs", "w") as f:
-    f.write(str(os.getpid()))
+open(ready_path, "w").close()
+time.sleep(0.5)
 
 results = {}
 
@@ -131,7 +142,7 @@ libc = ctypes.CDLL(None, use_errno=True)
 ptrace = libc.ptrace
 ptrace.argtypes = [ctypes.c_uint, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p]
 ptrace.restype = ctypes.c_long
-rc = ptrace(16, controller_pid, None, None)  # PTRACE_ATTACH
+rc = ptrace(16, controller_pid, None, None)
 results["ptrace"] = "denied" if rc == -1 and ctypes.get_errno() == errno.EPERM else "unexpectedly_allowed"
 
 try:
@@ -174,16 +185,24 @@ if results != {
 }:
     raise SystemExit(1)
 """
-        # signal is referenced inside the agent snippet; keep the snippet
-        # self-contained rather than inheriting test globals.
-        
-        result = _run_as_nobody(
-            agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup), str(controller_cgroup), cgroup_path=agent_cgroup
+        agent = _run_as_nobody(
+            agent_code,
+            str(daemon.pid),
+            str(socket_path),
+            str(agent_ready),
+            str(controller_cgroup),
         )
-        assert result.returncode == 0, result.stderr + result.stdout
+        _wait_for_file(agent_ready)
 
-        # Prove the hostile workload did not kill the controller and that the
-        # controller remains responsive after the attack attempts.
+        # The parent is still root, so it performs the cgroup admission before
+        # the hostile process has dropped to the unprivileged identity. This
+        # keeps the test's workload isolation setup independent of cgroup
+        # delegation/ownership policy for uid 65534.
+        (agent_cgroup / "cgroup.procs").write_text(f"{agent.pid}\n")
+
+        stdout, stderr = agent.communicate(timeout=5)
+        assert agent.returncode == 0, stderr + stdout
+
         assert daemon.poll() is None
 
         status = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -195,6 +214,9 @@ if results != {
             status.close()
         assert '"ok": true' in response
     finally:
+        if agent is not None and agent.poll() is None:
+            agent.kill()
+            agent.wait(timeout=3)
         if daemon is not None and daemon.poll() is None:
             daemon.send_signal(signal.SIGTERM)
             try:
@@ -211,6 +233,10 @@ if results != {
                 pass
         try:
             socket_path.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            agent_ready.unlink()
         except FileNotFoundError:
             pass
         try:
