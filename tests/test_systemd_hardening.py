@@ -44,3 +44,12 @@ def test_controller_service_has_boundary_hardening():
     assert "UMask=0077" in controller
     assert "RuntimeDirectory=agentcontainment" in controller
     assert "RuntimeDirectoryMode=0700" in controller
+
+
+def test_agent_admission_requires_controller_startup():
+    agent = _unit("agentcontainment-agent-example.service")
+
+    assert "Requires=agentcontainment.service" in agent
+    assert "After=agentcontainment.service" in agent
+    assert "PartOf=agentcontainment.service" in agent
+    assert "ExecStartPre=/usr/bin/test -S /run/agentcontainment/control.sock" in agent
