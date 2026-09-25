@@ -1,0 +1,20 @@
+[Unit]
+Description=Example AgentContainment-managed agent workload
+Requires=agentcontainment.service
+After=agentcontainment.service
+PartOf=agentcontainment.service
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+ExecStart=/usr/local/bin/your-agent
+Restart=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
