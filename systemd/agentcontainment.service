@@ -1,0 +1,26 @@
+[Unit]
+Description=AgentContainment controller
+After=local-fs.target
+Before=agentcontainment-agent.service
+
+[Service]
+Type=simple
+User=agentcontainment
+Group=agentcontainment
+ExecStart=/usr/bin/python3 -m agent_containment.daemon --socket /run/agentcontainment/control.sock --socket-mode 0600 --cgroup-root /sys/fs/cgroup/agent-containment --controller-cgroup /sys/fs/cgroup/agent-containment-controller
+RuntimeDirectory=agentcontainment
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
