@@ -52,5 +52,5 @@ jobs:
         run: bash scripts/build_ebpf.sh
       - name: Install package and test dependencies
         run: python -m pip install . pytest
-      - name: Run privileged containment adversarial tests
-        run: sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH" pytest -q tests/integration/test_linux_ebpf.py
+      - name: Run trusted privileged containment and isolation adversarial tests.
+        run: sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH" pytest -q tests/integration/test_linux_ebpf.py tests/integration/test_controller_isolation.py
