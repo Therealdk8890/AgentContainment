@@ -35,6 +35,8 @@ def test_non_root_process_uses_delegated_cgroup_subtree():
     marker = Path(f"/tmp/agent-containment-delegation-{os.getpid()}")
     nobody = 65534
     child = None
+    outside = None
+    outside_pid = None
 
     child_code = r"""
 import os
@@ -95,10 +97,29 @@ marker.write_text("passed", encoding="utf-8")
 
     try:
         parent.mkdir()
+        outside = cgroup_root / f"agent-containment-outside-{os.getpid()}"
+        outside.mkdir()
         _delegate_cgroup(parent, nobody, nobody)
 
+        outside = outside.resolve()
+        outside_process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+        )
+        outside_pid = outside_process.pid
+        (outside / "cgroup.procs").write_text(f"{outside_pid}\n")
+
+        child_code += r"""
+outside_pid = int(sys.argv[3])
+try:
+    supervisor.attach_pid(agent, outside_pid)
+except PermissionError:
+    pass
+else:
+    raise SystemExit("delegated controller crossed its cgroup boundary")
+"""
         child = subprocess.Popen(
-            [sys.executable, "-c", child_code, str(parent), str(marker)],
+            [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid)],
+
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -115,7 +136,10 @@ marker.write_text("passed", encoding="utf-8")
         if child is not None and child.poll() is None:
             child.kill()
             child.wait(timeout=3)
-        for path in (parent / "agents", parent):
+        if outside_process.poll() is None:
+            outside_process.kill()
+            outside_process.wait(timeout=3)
+        for path in (parent / "agents", parent, outside):
             try:
                 path.rmdir()
             except OSError:
