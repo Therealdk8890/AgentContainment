@@ -10,6 +10,39 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Daniel Kissel" }]
+keywords = [
+  "ai-agents",
+  "agent-security",
+  "agent-containment",
+  "ai-safety",
+  "runtime-security",
+  "authorization",
+  "policy-enforcement",
+  "ebpf",
+  "cgroups",
+  "cilium",
+  "governance",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Therealdk8890/AgentContainment"
+Repository = "https://github.com/Therealdk8890/AgentContainment"
+Issues = "https://github.com/Therealdk8890/AgentContainment/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
