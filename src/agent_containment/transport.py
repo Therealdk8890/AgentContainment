@@ -88,13 +88,17 @@ class UnixControlServer:
             # semantics.
             conn.settimeout(2.0)
             data = bytearray()
-            while len(data) <= self.max_message_bytes:
-                chunk = conn.recv(min(4096, self.max_message_bytes + 1 - len(data)))
-                if not chunk:
-                    break
-                data.extend(chunk)
-                if b"\\n" in chunk:
-                    break
+            try:
+                while len(data) <= self.max_message_bytes:
+                    chunk = conn.recv(min(4096, self.max_message_bytes + 1 - len(data)))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if b"\n" in chunk:
+                        break
+            except socket.timeout:
+                self._send(conn, {"ok": False, "error": "request_timeout"})
+                return
 
             peer_uid, peer_pid = self._peer_credentials(conn)
             if not self._peer_allowed(peer_uid):
@@ -104,7 +108,7 @@ class UnixControlServer:
             if len(data) > self.max_message_bytes:
                 self._send(conn, {"ok": False, "error": "message_too_large"})
                 return
-            line = bytes(data).split(b"\\n", 1)[0].strip()
+            line = bytes(data).split(b"\n", 1)[0].strip()
             if not line:
                 self._send(conn, {"ok": False, "error": "empty_request"})
                 return
