@@ -70,6 +70,28 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     assert payload["tests"][0]["result"] == "passed"
 
 
+def test_hostile_agent_evidence_rejects_inconsistent_contained_result(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    try:
+        _write_evidence(
+            [
+                {
+                    "name": "controller isolation",
+                    "test_path": "tests/integration/test_controller_isolation.py",
+                    "result": "failed",
+                    "exit_code": 1,
+                    "duration_seconds": 0.2,
+                }
+            ],
+            "contained",
+        )
+    except ValueError as exc:
+        assert "inconsistent" in str(exc)
+    else:
+        raise AssertionError("inconsistent contained evidence was accepted")
+
+
 def test_hostile_agent_evidence_records_failures(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
