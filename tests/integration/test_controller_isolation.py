@@ -91,6 +91,8 @@ def test_unprivileged_agent_cannot_interfere_with_controller():
         assert os.stat(f"/proc/{daemon.pid}").st_uid == 0
 
         agent_code = r"""
+import ctypes
+import errno
 import os
 import signal
 import socket
