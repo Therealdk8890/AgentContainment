@@ -111,3 +111,46 @@ def test_apply_failure_is_degraded():
 
     assert result.status is EnforcementStatus.DEGRADED
     assert "forbidden" in result.detail
+
+
+def test_datapath_verifier_can_certify_realized_enforcement():
+    kubectl = FakeKubectl()
+    calls = []
+
+    def verifier(identity):
+        calls.append(identity.name)
+        return __import__("agent_containment.enforcer", fromlist=["EnforcementResult"]).EnforcementResult(
+            "datapath", EnforcementStatus.ENFORCED
+        )
+
+    enforcer = CiliumNetworkPolicyEnforcer(
+        {"agent-1": {"app": "agent-1"}},
+        kubectl=kubectl,
+        datapath_verifier=verifier,
+    )
+
+    enforcer.contain("agent-1")
+    assert enforcer.verify_contained("agent-1").status is EnforcementStatus.ENFORCED
+    assert calls == [enforcer._identities["agent-1"].name]
+
+
+def test_datapath_verifier_failure_does_not_certify_policy():
+    kubectl = FakeKubectl()
+
+    def verifier(identity):
+        return __import__("agent_containment.enforcer", fromlist=["EnforcementResult"]).EnforcementResult(
+            "datapath",
+            EnforcementStatus.VERIFICATION_FAILED,
+            "endpoint policy not realized",
+        )
+
+    enforcer = CiliumNetworkPolicyEnforcer(
+        {"agent-1": {"app": "agent-1"}},
+        kubectl=kubectl,
+        datapath_verifier=verifier,
+    )
+
+    enforcer.contain("agent-1")
+    result = enforcer.verify_contained("agent-1")
+    assert result.status is EnforcementStatus.VERIFICATION_FAILED
+    assert "endpoint policy not realized" in result.detail
