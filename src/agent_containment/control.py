@@ -7,6 +7,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
+from time import time
 from typing import Callable
 
 from .audit import AuditLog
@@ -17,6 +18,7 @@ from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
 from .runtime_fence import RuntimeFenceRegistry
+from .review import ReviewRequest, ReviewState
 from .verification_signal import VerificationSignal, decision_from_verification
 
 
@@ -50,7 +52,10 @@ class ContainmentService:
         incidents: IncidentRegistry | None = None,
         fences: RuntimeFenceRegistry | None = None,
         event_sink: Callable[[GovernanceEvent], None] | None = None,
+        review_timeout_seconds: float = 900.0,
     ):
+        if review_timeout_seconds <= 0:
+            raise ValueError("review_timeout_seconds must be positive")
         self._agents: dict[str, ManagedAgent] = {}
         self._lock = RLock()
         self.audit = audit
@@ -63,6 +68,8 @@ class ContainmentService:
             fences = RuntimeFenceRegistry(fence_path)
         self.fences = fences or RuntimeFenceRegistry()
         self.event_sink = event_sink
+        self.review_timeout_seconds = review_timeout_seconds
+        self._reviews: dict[str, ReviewRequest] = {}
 
     def register(self, agent_id: str, *, containment: ContainmentController | None = None,
                  metadata: dict[str, str] | None = None,
@@ -290,7 +297,102 @@ class ContainmentService:
 
         if base.decision is DecisionType.ALLOW and decision.decision is DecisionType.HALT:
             self.contain(action.agent_id)
+        elif base.decision is DecisionType.ALLOW and decision.decision is DecisionType.PAUSE:
+            review_id = self._create_review(action)
+            self._emit_event(
+                "review_requested",
+                agent_id=action.agent_id,
+                action_id=action.action_id,
+                policy_decision_id=action.action_id,
+                reason="claim verification requires human review",
+                attributes={"review_id": review_id, "deadline": self._reviews[review_id].deadline},
+            )
         return decision
+
+    def review(self, review_id: str) -> ReviewRequest:
+        with self._lock:
+            try:
+                request = self._reviews[review_id]
+            except KeyError as exc:
+                raise KeyError(f"unknown review: {review_id}") from exc
+            state = request.current_state()
+            if state is not request.state:
+                request = ReviewRequest(
+                    review_id=request.review_id,
+                    agent_id=request.agent_id,
+                    action_id=request.action_id,
+                    requested_at=request.requested_at,
+                    deadline=request.deadline,
+                    state=state,
+                )
+                self._reviews[review_id] = request
+            return request
+
+    def approve_review(self, review_id: str) -> Decision:
+        """Approve one pending action through the controller boundary."""
+        with self._lock:
+            request = self.review(review_id)
+            if request.state is ReviewState.EXPIRED:
+                raise RuntimeError("review has expired; request a new review")
+            if request.state is not ReviewState.PENDING:
+                raise RuntimeError(f"review is not pending: {request.state.value}")
+            approved = ReviewRequest(
+                review_id=request.review_id,
+                agent_id=request.agent_id,
+                action_id=request.action_id,
+                requested_at=request.requested_at,
+                deadline=request.deadline,
+                state=ReviewState.APPROVED,
+            )
+            self._reviews[review_id] = approved
+            self._emit_event(
+                "review_approved",
+                agent_id=request.agent_id,
+                action_id=request.action_id,
+                policy_decision_id=request.action_id,
+                reason="human review approved through controller",
+                attributes={"review_id": review_id},
+            )
+            return Decision(request.action_id, DecisionType.ALLOW, "human review approved")
+
+    def escalate_review(self, review_id: str) -> Decision:
+        """Fail closed by escalating a pending or expired review to containment."""
+        with self._lock:
+            request = self.review(review_id)
+            if request.state is ReviewState.APPROVED:
+                raise RuntimeError("approved review cannot be escalated")
+            escalated = ReviewRequest(
+                review_id=request.review_id,
+                agent_id=request.agent_id,
+                action_id=request.action_id,
+                requested_at=request.requested_at,
+                deadline=request.deadline,
+                state=ReviewState.ESCALATED,
+            )
+            self._reviews[review_id] = escalated
+            self._emit_event(
+                "review_escalated",
+                agent_id=request.agent_id,
+                action_id=request.action_id,
+                policy_decision_id=request.action_id,
+                reason="review escalated to controller containment",
+                attributes={"review_id": review_id, "prior_state": request.state.value},
+            )
+            self.contain(request.agent_id)
+            return Decision(request.action_id, DecisionType.HALT, "review escalated to containment")
+
+    def _create_review(self, action: Action) -> str:
+        review_id = f"{action.agent_id}:review:{secrets.token_hex(8)}"
+        now = time()
+        request = ReviewRequest(
+            review_id=review_id,
+            agent_id=action.agent_id,
+            action_id=action.action_id,
+            requested_at=now,
+            deadline=now + self.review_timeout_seconds,
+        )
+        self._reviews[review_id] = request
+        return review_id
 
     def unregister(self, agent_id: str) -> None:
         with self._lock:
@@ -375,18 +477,22 @@ class ContainmentService:
                     reason=incident_persistence_failure,
                 )
                 return report.with_persistence_failure(incident_persistence_failure)
-            if report.complete:
+            if report.certified:
                 self._emit_event(
                     "containment_certified", agent_id=agent_id,
                     incident_id=incident_id, containment_epoch=report.epoch,
-                    reason="all configured containment stages completed and external enforcement was verified",
+                    reason="all configured containment stages completed and external enforcement was independently verified",
                 )
             else:
                 self._emit_event(
                     "containment_verification_failed", agent_id=agent_id,
                     incident_id=incident_id, containment_epoch=report.epoch,
-                    reason="one or more containment stages or external enforcement verifications failed",
-                    attributes={"failures": list(report.failures)},
+                    reason=(
+                        "containment stages completed without independent external verification"
+                        if report.complete and not report.external_verified
+                        else "one or more containment stages or external enforcement verifications failed"
+                    ),
+                    attributes={"failures": list(report.failures), "external_verified": report.external_verified},
                 )
             return report
 
