@@ -73,7 +73,7 @@ class CiliumNetworkPolicyEnforcer:
             raise ValueError("namespace must be a non-empty Kubernetes namespace")
         self._namespace = namespace
         self._kubectl = kubectl
-        self._datapath_verifier = datapath_verifier
+        self._datapath_verifier = datapath_verifier or self._verify_cilium_endpoint_datapath
         self._identities: dict[str, CiliumPolicyIdentity] = {}
 
         for agent_id, selector in selectors.items():
@@ -171,6 +171,57 @@ class CiliumNetworkPolicyEnforcer:
             ingress_deny == [{"fromEntities": ["all"]}]
             and egress_deny == [{"toEntities": ["all"]}]
         )
+
+    def _verify_cilium_endpoint_datapath(
+        self, identity: CiliumPolicyIdentity
+    ) -> EnforcementResult:
+        """Verify selected Cilium endpoints report both directions enforced."""
+        selector = ",".join(
+            f"{key}={value}" for key, value in sorted(identity.selector.items())
+        )
+        result = self._kubectl(
+            [
+                "get", "ciliumendpoints", "-n", self._namespace,
+                "-l", selector, "-o", "json",
+            ]
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            return EnforcementResult(
+                self.name, EnforcementStatus.VERIFICATION_FAILED,
+                detail or f"kubectl get ciliumendpoints exited {result.returncode}",
+            )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            return EnforcementResult(
+                self.name, EnforcementStatus.VERIFICATION_FAILED,
+                f"invalid CiliumEndpoint JSON response: {exc}",
+            )
+
+        items = payload.get("items")
+        if not isinstance(items, list) or not items:
+            return EnforcementResult(
+                self.name, EnforcementStatus.VERIFICATION_FAILED,
+                "no CiliumEndpoint matched the containment selector",
+            )
+
+        for endpoint in items:
+            status = endpoint.get("status") if isinstance(endpoint, Mapping) else None
+            policy = status.get("policy") if isinstance(status, Mapping) else None
+            realized = policy.get("realized") if isinstance(policy, Mapping) else None
+            if not isinstance(realized, Mapping):
+                return EnforcementResult(
+                    self.name, EnforcementStatus.VERIFICATION_FAILED,
+                    "CiliumEndpoint has no realized policy status",
+                )
+            if realized.get("policy-enabled") != "both":
+                return EnforcementResult(
+                    self.name, EnforcementStatus.VERIFICATION_FAILED,
+                    "CiliumEndpoint policy enforcement is not enabled for both ingress and egress",
+                )
+
+        return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
 
     def contain(self, agent_id: str) -> EnforcementResult:
         identity = self._identity(agent_id)
