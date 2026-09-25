@@ -11,7 +11,7 @@
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir>\n", prog);
+    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir> | verify <pin-dir>\n", prog);
 }
 
 static int ensure_dir(const char *path)
@@ -91,6 +91,21 @@ static int detach_program(const char *pin_dir)
     return 0;
 }
 
+static int verify_program(const char *pin_dir)
+{
+    char link_path[PATH_MAX];
+    snprintf(link_path, sizeof(link_path), "%s/egress_link", pin_dir);
+
+    int fd = bpf_obj_get(link_path);
+    if (fd < 0) {
+        fprintf(stderr, "pinned egress link is not available: %s\n", strerror(errno));
+        return -1;
+    }
+    close(fd);
+    printf("verified pinned egress link at %s\n", link_path);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 3) { usage(argv[0]); return 2; }
@@ -101,6 +116,10 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "detach") == 0) {
         if (argc != 3) { usage(argv[0]); return 2; }
         return detach_program(argv[2]) == 0 ? 0 : 1;
+    }
+    if (strcmp(argv[1], "verify") == 0) {
+        if (argc != 3) { usage(argv[0]); return 2; }
+        return verify_program(argv[2]) == 0 ? 0 : 1;
     }
     usage(argv[0]);
     return 2;

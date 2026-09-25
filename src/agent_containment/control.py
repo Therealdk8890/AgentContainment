@@ -449,6 +449,8 @@ class ContainmentService:
                         stages=list(report.stages),
                         failures=list(report.failures),
                         complete=report.complete,
+                        external_verified=report.external_verified,
+                        certified=report.certified,
                     )
                 except Exception as exc:
                     # Never turn a successful runtime fence into an apparent
