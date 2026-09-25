@@ -92,6 +92,19 @@ def test_hostile_agent_evidence_rejects_inconsistent_contained_result(tmp_path, 
         raise AssertionError("inconsistent contained evidence was accepted")
 
 
+def test_hostile_agent_evidence_rejects_empty_evidence(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    try:
+        _write_evidence([], "contained")
+    except ValueError as exc:
+        assert "without recorded tests" in str(exc)
+    else:
+        raise AssertionError("empty evidence was accepted")
+
+
+
+
 def test_hostile_agent_evidence_records_failures(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
