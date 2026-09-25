@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import subprocess
@@ -8,26 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from agent_containment.audit import AuditLog
 from agent_containment.containment import ContainmentController
 from agent_containment.control import ContainmentService
-from agent_containment.egress_enforcement import LinuxEbpfEgressEnforcer
+from agent_containment.egress_enforcement import LinuxEbpfExternalEnforcer
 from agent_containment.process import LinuxCgroupProcessContainment
 from agent_containment.runtime import Runtime, RuntimeState
 
 
 pytestmark = pytest.mark.integration
-
-
-def _run(cmd, *, env=None, timeout=10):
-    result = subprocess.run(
-        cmd, check=False, text=True, capture_output=True, env=env, timeout=timeout
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise AssertionError(
-            f"command failed ({result.returncode}): {detail or '<no diagnostic output>'}"
-        )
-    return result
 
 
 def _wait_for_file(path: Path, timeout=3):
@@ -62,7 +52,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         pytest.skip("BPF filesystem is unavailable")
     pin_dir = bpffs / f"agent-containment-test-{os.getpid()}"
     marker_dir = Path(tempfile.mkdtemp(prefix="agent-containment-test-"))
-    pin_dir.mkdir()
+    audit_path = marker_dir / "audit.jsonl"
     marker = marker_dir / "connected"
     blocked = marker_dir / "blocked"
     escaped = marker_dir / "escaped"
@@ -114,20 +104,32 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert conn.recv(64) == b"pre-containment"
         conn.close()
 
-        runtime_service = ContainmentService()
-        enforcer = LinuxEbpfEgressEnforcer(
+        runtime = Runtime("adversarial-agent")
+        lease = runtime.acquire_lease()
+        assert lease is not None
+
+        audit = AuditLog(audit_path)
+        enforcer = LinuxEbpfExternalEnforcer(
             str(controller), str(obj), str(group), str(pin_dir)
         )
+        containment = ContainmentController(
+            runtime,
+            process_containment=LinuxCgroupProcessContainment(group),
+            enforcers=[enforcer],
+        )
+        runtime_service = ContainmentService(audit=audit)
         runtime_service.register(
             "adversarial-agent",
-            containment=ContainmentController(
-                Runtime("adversarial-agent"),
-                kernel_egress=enforcer,
-            ),
+            containment=containment,
         )
+
         report = runtime_service.contain("adversarial-agent")
         assert report.complete
-        assert "kernel_egress_contained" in report.stages
+        assert report.certified
+        assert report.external_verified
+        assert "enforcer:linux-ebpf-egress:verified" in report.stages
+        assert runtime.state is RuntimeState.CONTAINED
+        assert not runtime.lease_valid(lease)
 
         assert child.stdin is not None
         child.stdin.write("go\n")
@@ -141,6 +143,18 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
 
         child.wait(timeout=3)
         assert child.returncode == 0
+
+        ok, reason = audit.verify()
+        assert ok, reason
+        events = [
+            json.loads(line)
+            for line in audit_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        containment_events = [event for event in events if event["event_type"] == "containment"]
+        assert containment_events
+        assert containment_events[-1]["external_verified"] is True
+        assert containment_events[-1]["complete"] is True
     finally:
         if child is not None and child.poll() is None:
             child.kill()
@@ -161,6 +175,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
             marker_dir.rmdir()
         except OSError:
             pass
+
 
 def test_controller_containment_kills_hostile_cgroup_process():
     if sys.platform != "linux":
