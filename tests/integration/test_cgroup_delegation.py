@@ -1,13 +1,21 @@
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
 
 pytestmark = pytest.mark.integration
+
+
+def _delegate_cgroup(path: Path, uid: int, gid: int) -> None:
+    """Model systemd's cgroupfs delegation ownership for a test subtree."""
+    os.chown(path, uid, gid)
+    for name in ("cgroup.procs", "cgroup.subtree_control"):
+        interface = path / name
+        if interface.exists():
+            os.chown(interface, uid, gid)
 
 
 def test_non_root_process_uses_delegated_cgroup_subtree():
@@ -27,13 +35,11 @@ def test_non_root_process_uses_delegated_cgroup_subtree():
     marker = Path(f"/tmp/agent-containment-delegation-{os.getpid()}")
     nobody = 65534
     child = None
-    workload = None
 
     child_code = r"""
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from agent_containment.linux_supervisor import LinuxCgroupSupervisor
@@ -52,6 +58,13 @@ if supervisor._delegated_root() != expected:
 agent = supervisor.create_agent("delegated-agent")
 if not agent.is_dir():
     raise SystemExit("agent cgroup was not created")
+
+for name in ("cgroup.procs", "cgroup.kill"):
+    interface = agent / name
+    if not interface.exists():
+        raise SystemExit(f"missing delegated interface: {name}")
+    if not os.access(interface, os.W_OK):
+        raise SystemExit(f"delegated interface is not writable: {name}")
 
 workload = subprocess.Popen(
     [sys.executable, "-c", "import time; time.sleep(30)"]
@@ -82,27 +95,24 @@ marker.write_text("passed", encoding="utf-8")
 
     try:
         parent.mkdir()
-        # Simulate the ownership established by a real systemd Delegate=yes
-        # boundary. The root test process performs the one-time delegation;
-        # the child then exercises the subtree entirely as nobody.
-        os.chown(parent, nobody, nobody)
-        parent.chmod(0o755)
+        _delegate_cgroup(parent, nobody, nobody)
 
-        # Move the child into the delegated parent before it drops privileges.
         child = subprocess.Popen(
             [sys.executable, "-c", child_code, str(parent), str(marker)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             preexec_fn=lambda: os.setuid(nobody),
         )
-        (parent / "cgroup.procs").write_text(f"{child.pid}\n")
-        child.wait(timeout=10)
+        (parent / "cgroup.procs").write_text(f"{child.pid}
+")
+        stdout, stderr = child.communicate(timeout=10)
 
-        assert child.returncode == 0
+        assert child.returncode == 0, stderr + stdout
         assert marker.read_text(encoding="utf-8") == "passed"
         assert not (parent / "agents").exists()
     finally:
-        if workload is not None and workload.poll() is None:
-            workload.kill()
-            workload.wait(timeout=3)
         if child is not None and child.poll() is None:
             child.kill()
             child.wait(timeout=3)
