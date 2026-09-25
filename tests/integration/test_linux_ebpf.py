@@ -15,6 +15,7 @@ from agent_containment.control import ContainmentService
 from agent_containment.egress_enforcement import LinuxEbpfExternalEnforcer
 from agent_containment.process import LinuxCgroupProcessContainment
 from agent_containment.runtime import Runtime, RuntimeState
+from agent_containment.warden_observer import WardenObserver
 
 
 pytestmark = pytest.mark.integration
@@ -118,7 +119,11 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
             runtime,
             enforcers=[enforcer],
         )
-        runtime_service = ContainmentService(audit=audit)
+        observer = WardenObserver()
+        runtime_service = ContainmentService(
+            audit=audit,
+            event_sink=observer.observe,
+        )
         runtime_service.register(
             "adversarial-agent",
             containment=containment,
@@ -137,6 +142,21 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert "enforcer:linux-ebpf-egress:verified" in report.stages
         assert runtime.state is RuntimeState.CONTAINED
         assert not runtime.lease_valid(lease)
+
+        observed_types = [observation.observed_event_type for observation in observer.snapshot()]
+        assert observed_types[:2] == ["agent_registered", "containment_requested"]
+        assert "capability_revoked" in observed_types
+        assert "containment_enforced" in observed_types
+        assert "containment_certified" in observed_types
+
+        observed_containment = [
+            observation
+            for observation in observer.snapshot()
+            if observation.observed_event_type == "containment_certified"
+        ]
+        assert observed_containment
+        assert observed_containment[-1].agent_id == "adversarial-agent"
+        assert observed_containment[-1].containment_epoch == report.epoch
 
         assert child.stdin is not None
         child.stdin.write("go\n")
