@@ -27,7 +27,7 @@ def _run_as_nobody(code: str, *args: str, cgroup_path: Path) -> subprocess.Compl
     nobody = 65534
 
     def drop_identity_and_join_cgroup() -> None:
-        (cgroup_path / "cgroup.procs").write_text(f"{os.getpid()}\\n")
+        (cgroup_path / "cgroup.procs").write_text(f"{os.getpid()}\n")
         os.setuid(nobody)
 
     return subprocess.run(
