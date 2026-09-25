@@ -67,11 +67,13 @@ class CiliumNetworkPolicyEnforcer:
         *,
         namespace: str = "default",
         kubectl: _CommandRunner = _kubectl_runner,
+        datapath_verifier: Callable[[CiliumPolicyIdentity], EnforcementResult] | None = None,
     ):
         if not namespace or namespace.startswith("-"):
             raise ValueError("namespace must be a non-empty Kubernetes namespace")
         self._namespace = namespace
         self._kubectl = kubectl
+        self._datapath_verifier = datapath_verifier
         self._identities: dict[str, CiliumPolicyIdentity] = {}
 
         for agent_id, selector in selectors.items():
@@ -149,6 +151,13 @@ class CiliumNetworkPolicyEnforcer:
             return False
         if metadata.get("name") != identity.name or metadata.get("namespace") != self._namespace:
             return False
+        labels = metadata.get("labels")
+        if not isinstance(labels, Mapping):
+            return False
+        if labels.get("app.kubernetes.io/managed-by") != "agentcontainment":
+            return False
+        if labels.get("agentcontainment.io/policy") != "containment":
+            return False
 
         selector = spec.get("endpointSelector")
         if not isinstance(selector, Mapping):
@@ -208,6 +217,15 @@ class CiliumNetworkPolicyEnforcer:
                     EnforcementStatus.VERIFICATION_FAILED,
                     "live CiliumNetworkPolicy does not match the expected containment policy",
                 )
+            if self._datapath_verifier is not None:
+                datapath = self._datapath_verifier(identity)
+                if datapath.status is not EnforcementStatus.ENFORCED:
+                    return EnforcementResult(
+                        self.name,
+                        EnforcementStatus.VERIFICATION_FAILED,
+                        "Cilium policy object is present but datapath verification failed"
+                        + (f": {datapath.detail}" if datapath.detail else ""),
+                    )
             return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
         except (OSError, subprocess.SubprocessError) as exc:
             return EnforcementResult(
