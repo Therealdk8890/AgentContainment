@@ -8,6 +8,9 @@ PartOf=agentcontainment.service
 Type=simple
 User=agent
 Group=agent
+# Admission is fail-closed: systemd may only start the workload after the
+# controller has created its controller-owned Unix socket.
+ExecStartPre=/usr/bin/test -S /run/agentcontainment/control.sock
 ExecStart=/usr/local/bin/your-agent
 Restart=no
 NoNewPrivileges=yes
