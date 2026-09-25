@@ -6,7 +6,6 @@ from .governance_event import GovernanceEvent
 from .enforcer import Enforcer, EnforcementResult, EnforcementStatus, NoopEnforcer
 from .gateway import ActionGateway
 from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
-from .governance_event import GovernanceEvent
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
@@ -19,5 +18,5 @@ __all__ = [
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
-    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "GovernanceEvent",
+    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer",
 ]
