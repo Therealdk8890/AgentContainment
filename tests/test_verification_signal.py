@@ -278,7 +278,7 @@ def test_pending_review_can_be_approved_without_containment():
     service.authorize = lambda action, **kwargs: Decision(action.action_id, DecisionType.ALLOW, "test authorization")
     action = Action("agent-review-ok", "review-action", "publish", "memo")
 
-    decision = service.authorize_verified(action, signal(disposition="requireReview"))
+    decision = service.authorize_verified(action, signal(disposition="requireReview", actionID="review-action"))
     assert decision.decision is DecisionType.PAUSE
     review = next(iter(service._reviews.values()))
 
