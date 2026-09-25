@@ -28,6 +28,10 @@ def test_incident_can_be_exported_as_regression_fixture():
     assert fixture.to_json().startswith('{"action_sequence":')
     assert len(fixture.fingerprint) == 64
     assert fixture.fingerprint == fixture.fingerprint
+    wire = fixture.to_wire_dict()
+    assert wire["schema"] == "agent-containment/regression-fixture/v1"
+    assert wire["fingerprint"] == fixture.fingerprint
+    assert wire["fixture"] == fixture.to_dict()
 
 
 def test_regression_fixture_rejects_recovered_incident():
