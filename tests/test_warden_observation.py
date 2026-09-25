@@ -1,4 +1,5 @@
 from agent_containment.control import ContainmentService
+from agent_containment.enforcer import EnforcementResult, EnforcementStatus
 from agent_containment.governance_event import GovernanceEvent
 from agent_containment.warden_observation import WardenObservation
 
@@ -101,6 +102,22 @@ from agent_containment.warden_observation import WardenObservation
 from agent_containment.warden_observer import WardenObserver
 
 
+class RecordingEnforcer:
+    name = "recording"
+
+    def contain(self, agent_id):
+        return EnforcementResult(self.name, EnforcementStatus.ENFORCED, "boundary applied")
+
+    def release(self, agent_id):
+        return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+    def verify_contained(self, agent_id):
+        return EnforcementResult(self.name, EnforcementStatus.ENFORCED, "boundary observed")
+
+    def verify_released(self, agent_id):
+        return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+
 class FakeSupervisor:
     def create_agent(self, agent_id):
         return f"/controller/{agent_id}"
@@ -130,8 +147,9 @@ def test_real_controller_chain_is_reconstructable_by_warden():
         cgroup_supervisor=FakeSupervisor(),
         event_sink=observer.observe,
     )
-    service.register("agent-1")
-
+    from agent_containment.containment import ContainmentController
+    service.register("agent-1", containment=ContainmentController(__import__("agent_containment.runtime", fromlist=["Runtime"]).Runtime("agent-1"), enforcers=[RecordingEnforcer()]))
+    )
     service.create_workload("agent-1")
     token = service.issue_identity_token("agent-1", peer_pid=1234)
 
