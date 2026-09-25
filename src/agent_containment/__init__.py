@@ -1,5 +1,6 @@
 from .control import ContainmentService, ManagedAgent, RecoveryAuthorization
 from .cgroup_enforcer import CgroupV2Enforcer
+from .cilium_enforcer import CiliumNetworkPolicyEnforcer
 from .egress import EgressController, EgressLease, hard_close_socket
 from .enforcer import Enforcer, EnforcementResult, EnforcementStatus, NoopEnforcer
 from .gateway import ActionGateway
@@ -16,5 +17,5 @@ __all__ = [
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
-    "CgroupV2Enforcer",
+    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer",
 ]
