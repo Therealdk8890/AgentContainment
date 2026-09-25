@@ -56,3 +56,66 @@ def test_recovery_failure_recontains_external_enforcement():
     assert enforcer.release_calls == 1
     assert enforcer.contain_calls == 2
     assert not enforcer.released
+
+
+
+def test_failed_runtime_recovery_records_signed_evidence_and_recontainment():
+    from agent_containment.proof_receipt import ReceiptVerifier
+
+    runtime = Runtime("agent-2")
+    enforcer = RecoveryTransactionEnforcer()
+    controller = ContainmentController(runtime, enforcers=[enforcer])
+    controller.contain()
+    epoch = runtime.epoch
+    capability = runtime._rotate_recovery_capability()
+
+    try:
+        controller.recover(capability, epoch + 1)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("recovery must fail")
+
+    report = controller.last_recovery_report
+    assert report is not None
+    assert report.contained_epoch == epoch
+    assert report.recovered_epoch is None
+    assert report.events == (
+        "recovery_requested",
+        "external_release_verified",
+        "runtime_recovery_failed",
+        "recontainment_verified",
+    )
+    assert report.failures
+    assert report.recontainment_failures == ()
+    assert report.proof_status == "degraded"
+
+    receipt = report.to_receipt(b"recovery-proof-secret", execution_id="exec-2")
+    assert receipt.payload["recovery_result"] == "aborted"
+    assert receipt.payload["events"] == list(report.events)
+    assert ReceiptVerifier(b"recovery-proof-secret").verify(receipt)
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.epoch == epoch
+    assert not runtime.can_execute
+
+
+def test_successful_recovery_records_complete_evidence():
+    runtime = Runtime("agent-3")
+    enforcer = RecoveryTransactionEnforcer()
+    controller = ContainmentController(runtime, enforcers=[enforcer])
+    controller.contain()
+    epoch = runtime.epoch
+    capability = runtime._rotate_recovery_capability()
+
+    recovered_epoch = controller.recover(capability, epoch)
+
+    report = controller.last_recovery_report
+    assert report is not None
+    assert report.successful
+    assert report.proof_status == "verified"
+    assert report.recovered_epoch == recovered_epoch
+    assert report.events == (
+        "recovery_requested",
+        "external_release_verified",
+        "runtime_recovery_complete",
+    )
