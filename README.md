@@ -4,11 +4,11 @@
 
 AgentContainment provides the control side of a broader agent-governance loop: authorize actions, detect policy violations, halt compromised runs, revoke authority, contain blast radius, verify external enforcement, and preserve verifiable incident evidence.
 
-Paired with a provenance system such as DProvenanceKit, it forms a closed governance loop:
+Paired with provenance and claim-verification layers such as DProvenanceKit and ClaimProofKit, it forms a closed governance loop:
 
 `Observe → Prove → Authorize → Enforce → Contain → Recover → Regression`
 
-The architectural goal is not two unrelated security libraries. It is a composable governance stack in which provenance explains **what happened**, containment enforces **what was allowed**, and incidents become durable inputs to **future regression tests**. It is intentionally provider-neutral: platform enforcement can be supplied by cgroup v2/eBPF, Cilium, Tetragon, or another independently verifiable enforcement system.
+The architectural goal is not a collection of unrelated security libraries. It is a composable governance stack in which DProvenanceKit explains **what happened**, AgentContainment enforces **what was allowed**, ClaimProofKit verifies **what is supported by evidence**, and incidents become durable inputs to **future regression tests**. It is intentionally provider-neutral: platform enforcement can be supplied by cgroup v2/eBPF, Cilium, Tetragon, or another independently verifiable enforcement system.
 
 **Keywords:** AI agent security, agent containment, autonomous agent security, AI runtime security, agent security control plane, AI agent firewall, agent firewall, AI agent sandbox, agent sandboxing, AI guardrails, agent governance, AI safety, runtime enforcement, action authorization, policy enforcement, kill switch, incident response, blast radius containment, enforcement verification, Cilium, CiliumNetworkPolicy, Kubernetes network policy, Tetragon, eBPF, Linux cgroups, cgroup v2, zero trust, defense in depth, tamper-evident audit, security engineering, open source AI security.
 
@@ -43,6 +43,27 @@ The integration point is intentional:
 - **Incidents** can be converted into deterministic regression cases so a previously observed failure becomes a future release gate.
 
 See [`docs/GOVERNANCE_PLATFORM.md`](docs/GOVERNANCE_PLATFORM.md) for the platform architecture and implementation roadmap.
+
+### Governance integration contract
+
+The open-source stack is intentionally modular:
+
+```text
+             GOVERNANCE CONTRACT
+                    │
+        +-----------+-----------+
+        ▼           ▼           ▼
+ DProvenanceKit  AgentContainment  ClaimProofKit
+    PROVE           CONTROL          VERIFY
+        \             │             /
+         \            │            /
+          +------ regression ------+
+```
+
+AgentContainment emits controller-owned `GovernanceEvent` records and can
+export incidents as `RegressionFixture` cases. Downstream provenance and
+claim-verification systems can attach evidence and support decisions without
+becoming the containment or recovery authority.
 
 ## Core model
 
