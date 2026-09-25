@@ -128,6 +128,12 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert report.complete
         assert report.certified
         assert report.external_verified
+        assert report.containment_requested_at is not None
+        assert report.provider_applied_at is not None
+        assert report.independently_verified_at is not None
+        assert report.containment_requested_at <= report.provider_applied_at <= report.independently_verified_at
+        assert report.enforcement_latency_seconds is not None
+        assert report.enforcement_latency_seconds >= 0
         assert "enforcer:linux-ebpf-egress:verified" in report.stages
         assert runtime.state is RuntimeState.CONTAINED
         assert not runtime.lease_valid(lease)
@@ -139,6 +145,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         _wait_for_file(attempted)
         _wait_for_file(blocked)
         assert not escaped.exists()
+        assert report.enforcement_latency_seconds < 1.0
 
         with pytest.raises(socket.timeout):
             server.accept()
