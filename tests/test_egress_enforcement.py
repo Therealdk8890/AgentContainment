@@ -55,7 +55,7 @@ def test_linux_ebpf_enforcer_invokes_controller(monkeypatch, tmp_path: Path):
             str(pin_dir),
         ],
         {
-            "check": True,
+            "check": False,
             "timeout": 10.0,
             "capture_output": True,
             "text": True,
