@@ -40,10 +40,17 @@ def test_controller_service_has_boundary_hardening():
     assert "ProtectKernelTunables=yes" in controller
     assert "ProtectKernelModules=yes" in controller
     assert "ProtectControlGroups=no" in controller
+    assert "Delegate=yes" in controller
     assert "RestrictSUIDSGID=yes" in controller
     assert "UMask=0077" in controller
     assert "RuntimeDirectory=agentcontainment" in controller
     assert "RuntimeDirectoryMode=0700" in controller
+
+
+def test_controller_uses_systemd_delegated_cgroup_root():
+    controller = _unit("agentcontainment.service")
+    assert "--cgroup-root auto" in controller
+    assert "--controller-cgroup" not in controller
 
 
 def test_agent_admission_requires_controller_startup():
