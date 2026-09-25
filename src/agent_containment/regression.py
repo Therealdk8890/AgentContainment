@@ -1,11 +1,12 @@
 """Portable incident-to-regression fixtures for governance integrations."""
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .incident_state import IncidentRecord
+from .incident_state import IncidentRecord, IncidentState
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,11 @@ class RegressionFixture:
             ensure_ascii=False,
         )
 
+    @property
+    def fingerprint(self) -> str:
+        """Return a stable SHA-256 identity for this exact regression case."""
+        return hashlib.sha256(self.to_json().encode("utf-8")).hexdigest()
+
     @classmethod
     def from_incident(
         cls,
@@ -77,6 +83,10 @@ class RegressionFixture:
         policy_decision: str | None = None,
         evidence_refs: tuple[str, ...] = (),
     ) -> "RegressionFixture":
+        if incident.state not in (IncidentState.CONTAINED, IncidentState.PROOF_DEGRADED):
+            raise ValueError(
+                "only contained or proof-degraded incidents can become regression fixtures"
+            )
         return cls(
             incident_id=incident.incident_id,
             agent_id=incident.agent_id,
