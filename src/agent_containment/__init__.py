@@ -10,6 +10,7 @@ from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
+from .proof_receipt import ProofReceipt, ReceiptVerifier
 from .provenance import InMemoryProvenanceSink, ProvenanceEmitter, ProvenanceRecord, ProvenanceSink, provenance_record
 from .regression import RegressionFixture, RegressionFixtureBuilder, assert_regression
 from .regression_replay import RegressionReplayResult, assert_fixture_replays, replay_fixture
@@ -26,6 +27,7 @@ __all__ = [
     "RegressionReplayResult", "replay_fixture", "assert_fixture_replays",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
+    "ProofReceipt", "ReceiptVerifier",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
     "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "WardenObservation",
 ]
