@@ -19,6 +19,23 @@ jobs:
       - name: Run test suite with a hard timeout and verbose progress
         run: timeout --signal=TERM --kill-after=10s 120s pytest -vv
 
+  regression-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: python -m pip install . pytest
+      - name: Replay incident-derived regression fixtures
+        run: PYTHONPATH=src python -m pytest -q tests/test_regression.py tests/test_regression_replay.py
+      - name: Verify fixture files are valid JSON
+        run: python -m json.tool tests/fixtures/regression/secret-exfiltration.json >/dev/null
+
   ebpf-build:
     runs-on: ubuntu-latest
     steps:
