@@ -11,6 +11,7 @@ from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .provenance import InMemoryProvenanceSink, ProvenanceEmitter, ProvenanceRecord, ProvenanceSink, provenance_record
+from .regression import RegressionFixture, RegressionFixtureBuilder, assert_regression
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 from .warden_observation import WardenObservation
 
@@ -20,6 +21,7 @@ __all__ = [
     "ContainmentService", "ManagedAgent", "RecoveryAuthorization",
     "IncidentRecord", "IncidentRegistry", "IncidentState", "GovernanceEvent",
     "ProvenanceRecord", "ProvenanceSink", "ProvenanceEmitter", "InMemoryProvenanceSink", "provenance_record",
+    "RegressionFixture", "RegressionFixtureBuilder", "assert_regression",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
