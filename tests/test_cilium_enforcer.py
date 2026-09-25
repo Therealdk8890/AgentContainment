@@ -18,7 +18,7 @@ class FakeKubectl:
         if args[:2] == ["get", "ciliumendpoints"]:
             return subprocess.CompletedProcess(
                 args, 0,
-                stdout=json.dumps({"items": [{"status": {"policy": {"realized": {"policy-enabled": "both"}}}]}),
+                stdout=json.dumps({"items": [{"status": {"policy": {"realized": {"policy-enabled": "both"}}}}]}),
                 stderr="",
             )
         if args[:1] == ["get"]:
