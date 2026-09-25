@@ -13,9 +13,13 @@ No test intentionally attacks anything outside its temporary test resources.
 
 from __future__ import annotations
 
+import json
 import os
+import platform
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
 
 TESTS = [
@@ -38,16 +42,63 @@ TESTS = [
 ]
 
 
-def _run(label: str, path: str) -> int:
+def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
     print(f"\\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
+    started = time.monotonic()
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-rs", path],
         check=False,
     )
+    duration = time.monotonic() - started
     status = "PASS" if result.returncode == 0 else "FAIL"
     print(f"[{status}] {label}")
+    evidence.append(
+        {
+            "name": label,
+            "test_path": path,
+            "result": "passed" if result.returncode == 0 else "failed",
+            "exit_code": result.returncode,
+            "duration_seconds": round(duration, 6),
+        }
+    )
     return result.returncode
+
+
+def _write_evidence(evidence: list[dict[str, object]], result: str) -> None:
+    payload = {
+        "schema_version": 1,
+        "evidence_type": "hostile_agent_demo",
+        "result": result,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "repository": os.environ.get("GITHUB_REPOSITORY"),
+        "commit_sha": os.environ.get("GITHUB_SHA"),
+        "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "runner": {
+            "os": sys.platform,
+            "platform": platform.platform(),
+            "kernel": platform.release(),
+            "euid": os.geteuid(),
+        },
+        "tests": evidence,
+        "attack_matrix": [
+            {"attack": "controller_signal", "expected": "denied"},
+            {"attack": "controller_ptrace_memory", "expected": "denied"},
+            {"attack": "controller_ipc_tamper", "expected": "denied"},
+            {"attack": "cross_boundary_cgroup_migrate", "expected": "denied"},
+            {"attack": "cgroup_workload_containment", "expected": "enforced"},
+            {"attack": "post_containment_egress", "expected": "denied"},
+            {"attack": "stale_execution_lease", "expected": "invalidated"},
+        ],
+        "claims": {
+            "scope": "test evidence from temporary resources on the tested Linux host",
+            "universal_security_guarantee": False,
+            "host_cryptographic_attestation": False,
+        },
+    }
+    with open("hostile-agent-evidence.json", "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
 
 
 def main() -> int:
@@ -84,10 +135,12 @@ def main() -> int:
     print("")
 
     if failures:
+        _write_evidence(evidence, "failed")
         print("DEMO RESULT: FAILED")
         print("A boundary did not reproduce the expected proof.")
         return 1
 
+    _write_evidence(evidence, "contained")
     print("DEMO RESULT: CONTAINED")
     print("DEMO RESULT: ADVERSARIAL PROOFS PASSED")
     print(
