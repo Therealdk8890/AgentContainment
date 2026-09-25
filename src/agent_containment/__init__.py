@@ -9,6 +9,7 @@ from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
+from .regression import RegressionFixture
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 
 __all__ = [
@@ -18,5 +19,5 @@ __all__ = [
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
-    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer",
+    "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "RegressionFixture",
 ]
