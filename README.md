@@ -107,6 +107,24 @@ That does **not** make the system production-ready. It makes the engineering que
 
 > **Don't ask the agent to obey the boundary. Put the boundary outside the agent — then prove the boundary was actually enforced.**
 
+## Installation
+
+
+AgentContainment is packaged as a standard Python distribution. The first public PyPI release is planned after release validation; until then, install the current development version directly from GitHub:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install "git+https://github.com/Therealdk8890/AgentContainment.git"
+```
+
+After the first PyPI release, the intended installation path will be:
+
+```bash
+python -m pip install agentcontainment
+```
+
+The core package has no third-party runtime dependencies. Linux-specific enforcement providers may require host capabilities and external tools such as eBPF/libbpf or Cilium/Kubernetes; those are deployment requirements rather than core Python dependencies.
 ## Core model
 
 `Detect → Prove → Halt → Contain → Map → Recover`
