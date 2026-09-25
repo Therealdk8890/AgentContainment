@@ -145,3 +145,100 @@ marker.write_text("passed", encoding="utf-8")
             except OSError:
                 pass
         marker.unlink(missing_ok=True)
+
+
+def test_real_systemd_delegate_yes_creates_controller_owned_subtree():
+    """Prove an actual systemd Delegate=yes unit can manage its cgroup subtree."""
+    if sys.platform != "linux":
+        pytest.skip("Linux systemd integration test")
+    if os.geteuid() != 0:
+        pytest.skip("requires root to launch a delegated transient unit")
+    if os.environ.get("AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS") != "1":
+        pytest.skip("set AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 to run")
+    if subprocess.run(
+        ["systemctl", "is-system-running"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode not in (0, 1):
+        pytest.skip("systemd is unavailable")
+    if subprocess.run(
+        ["systemd-run", "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode != 0:
+        pytest.skip("systemd-run is unavailable")
+
+    unit = f"agentcontainment-delegation-test-{os.getpid()}"
+    source_root = Path(__file__).resolve().parents[2]
+    child_code = r"""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from agent_containment.linux_supervisor import LinuxCgroupSupervisor
+
+supervisor = LinuxCgroupSupervisor("auto")
+root = supervisor._delegated_root()
+if not root.is_dir():
+    raise SystemExit(f"delegated root does not exist: {root}")
+
+agent = supervisor.create_agent("systemd-agent")
+workload = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(30)"]
+)
+supervisor.attach_pid(agent, workload.pid)
+
+if not supervisor.pid_in_cgroup(workload.pid, agent):
+    raise SystemExit("systemd-delegated workload was not attached")
+
+if not supervisor.is_populated(agent):
+    raise SystemExit("systemd-delegated cgroup is not populated")
+
+supervisor.contain(agent)
+try:
+    workload.wait(timeout=3)
+except subprocess.TimeoutExpired:
+    workload.kill()
+    workload.wait(timeout=3)
+    raise SystemExit("cgroup.kill did not contain systemd-delegated workload")
+
+if supervisor.is_populated(agent):
+    raise SystemExit("systemd-delegated cgroup remained populated")
+
+supervisor.remove(agent)
+"""
+    try:
+        result = subprocess.run(
+            [
+                "systemd-run",
+                "--quiet",
+                "--wait",
+                "--pipe",
+                f"--unit={unit}",
+                "--uid=65534",
+                "--gid=65534",
+                "--property=Delegate=yes",
+                "--property=NoNewPrivileges=yes",
+                "env",
+                f"PYTHONPATH={source_root / 'src'}",
+                sys.executable,
+                "-c",
+                child_code,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr + result.stdout
+    finally:
+        subprocess.run(
+            ["systemctl", "stop", unit],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
