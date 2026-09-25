@@ -74,6 +74,22 @@ class RegressionFixture:
             ensure_ascii=False,
         )
 
+    def to_wire_dict(self) -> dict[str, object]:
+        """Return the portable wire representation consumed by other tools."""
+        return {
+            "schema": "agent-containment/regression-fixture/v1",
+            "fixture": self.to_dict(),
+            "fingerprint": self.fingerprint,
+        }
+
+    def to_wire_json(self) -> str:
+        return json.dumps(
+            self.to_wire_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+
     def to_json(self) -> str:
         return json.dumps(
             self.to_dict(),
