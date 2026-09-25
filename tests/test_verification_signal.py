@@ -106,3 +106,35 @@ def test_verification_cannot_override_base_policy_deny():
 
     assert decision.decision is DecisionType.DENY
     assert service.status("agent-1").value == "active"
+
+
+def test_mapping_parser_rejects_type_coercion_at_security_boundary():
+    for key, value in (("version", "1"), ("supportedClaimCount", "1"), ("totalClaimCount", True), ("reportFingerprint", 123)):
+        payload = {
+            "disposition": "allow",
+            "reportFingerprint": "report-1",
+            "policyFingerprint": "policy-1",
+            "totalClaimCount": 0,
+        }
+        payload[key] = value
+        try:
+            VerificationSignal.from_mapping(payload)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected strict rejection for {key}")
+
+
+def test_mapping_parser_rejects_present_optional_ids_with_wrong_type():
+    payload = {
+        "disposition": "allow",
+        "reportFingerprint": "report-1",
+        "policyFingerprint": "policy-1",
+        "traceID": 123,
+    }
+    try:
+        VerificationSignal.from_mapping(payload)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected invalid traceID to be rejected")
