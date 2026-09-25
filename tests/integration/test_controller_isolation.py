@@ -65,6 +65,7 @@ def test_unprivileged_agent_cannot_interfere_with_controller():
     controller_cgroup = root / f"agent-containment-controller-{os.getpid()}"
     agent_cgroup = root / f"agent-containment-agent-{os.getpid()}"
     marker.mkdir()
+    agent_ready.touch(mode=0o666)
     daemon = None
     agent = None
 
