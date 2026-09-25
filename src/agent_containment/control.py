@@ -316,6 +316,19 @@ class ContainmentService:
                     reason=incident_persistence_failure,
                 )
                 return report.with_persistence_failure(incident_persistence_failure)
+            if report.complete:
+                self._emit_event(
+                    "containment_certified", agent_id=agent_id,
+                    incident_id=incident_id, containment_epoch=report.epoch,
+                    reason="all configured containment stages completed and external enforcement was verified",
+                )
+            else:
+                self._emit_event(
+                    "containment_verification_failed", agent_id=agent_id,
+                    incident_id=incident_id, containment_epoch=report.epoch,
+                    reason="one or more containment stages or external enforcement verifications failed",
+                    attributes={"failures": list(report.failures)},
+                )
             return report
 
     def issue_recovery_authorization(self, agent_id: str) -> RecoveryAuthorization:
@@ -462,11 +475,16 @@ class ContainmentService:
             self.event_sink(event)
         except Exception:
             if self.audit:
-                self.audit.record(
-                    "governance_event_sink_failure",
-                    agent_id=agent_id,
-                    event_type=event_type,
-                )
+                try:
+                    self.audit.record(
+                        "governance_event_sink_failure",
+                        agent_id=agent_id,
+                        event_type=event_type,
+                    )
+                except Exception:
+                    # Governance integrations are downstream of containment;
+                    # a broken event sink or audit sink must never block control.
+                    pass
 
     def _managed(self, agent_id: str) -> ManagedAgent:
         try:
