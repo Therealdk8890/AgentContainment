@@ -1,3 +1,5 @@
+import ctypes
+import errno
 import os
 import signal
 import socket
@@ -105,11 +107,26 @@ results = {}
 
 try:
     os.kill(controller_pid, signal.SIGTERM)
-    results["signal"] = "unexpectedly_allowed"
+    results["signal_term"] = "unexpectedly_allowed"
 except PermissionError:
-    results["signal"] = "denied"
+    results["signal_term"] = "denied"
 except ProcessLookupError:
-    results["signal"] = "controller_gone"
+    results["signal_term"] = "controller_gone"
+
+try:
+    os.kill(controller_pid, signal.SIGKILL)
+    results["signal_kill"] = "unexpectedly_allowed"
+except PermissionError:
+    results["signal_kill"] = "denied"
+except ProcessLookupError:
+    results["signal_kill"] = "controller_gone"
+
+libc = ctypes.CDLL(None, use_errno=True)
+ptrace = libc.ptrace
+ptrace.argtypes = [ctypes.c_uint, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p]
+ptrace.restype = ctypes.c_long
+rc = ptrace(16, controller_pid, None, None)  # PTRACE_ATTACH
+results["ptrace"] = "denied" if rc == -1 and ctypes.get_errno() == errno.EPERM else "unexpectedly_allowed"
 
 try:
     with open(f"/proc/{controller_pid}/mem", "rb") as f:
@@ -126,11 +143,28 @@ try:
 except (PermissionError, ConnectionRefusedError, FileNotFoundError, OSError):
     results["ipc"] = "denied"
 
+try:
+    Path(socket_path).unlink()
+    results["socket_tamper"] = "unexpectedly_allowed"
+except (PermissionError, OSError):
+    results["socket_tamper"] = "denied"
+
+try:
+    with open(sys.argv[4] + "/cgroup.procs", "w") as f:
+        f.write(str(controller_pid))
+    results["cgroup_tamper"] = "unexpectedly_allowed"
+except (PermissionError, OSError):
+    results["cgroup_tamper"] = "denied"
+
 print(results)
 if results != {
-    "signal": "denied",
+    "signal_term": "denied",
+    "signal_kill": "denied",
+    "ptrace": "denied",
     "ptrace_state": "denied",
     "ipc": "denied",
+    "socket_tamper": "denied",
+    "cgroup_tamper": "denied",
 }:
     raise SystemExit(1)
 """
@@ -141,7 +175,7 @@ if results != {
 import signal
 ")
         result = _run_as_nobody(
-            agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup), cgroup_path=agent_cgroup
+            agent_code, str(daemon.pid), str(socket_path), str(agent_cgroup), str(controller_cgroup), cgroup_path=agent_cgroup
         )
         assert result.returncode == 0, result.stderr + result.stdout
 
