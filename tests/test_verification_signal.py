@@ -38,3 +38,70 @@ def test_mismatched_action_is_denied():
         signal(),
     )
     assert decision.decision is DecisionType.DENY
+
+
+def test_verified_block_enters_durable_containment_and_emits_linked_events():
+    events = []
+    service = __import__("agent_containment.control", fromlist=["ContainmentService"]).ContainmentService(
+        event_sink=events.append,
+    )
+    service.register("agent-1")
+    action = Action("agent-1", "action-1", "publish", "memo")
+    decision = service.authorize_verified(
+        action,
+        signal(
+            traceID="trace-1",
+            runID="run-1",
+            reportFingerprint="report-blocked",
+            policyFingerprint="policy-1",
+        ),
+    )
+
+    assert decision.decision is DecisionType.HALT
+    assert service.status("agent-1").value == "contained"
+    incident = service.incident("agent-1")
+    assert incident is not None
+    assert incident.incident_id == "agent-1:containment:1"
+
+    verification = [event for event in events if event.event_type == "verification_evaluated"]
+    assert len(verification) == 1
+    assert verification[0].trace_id == "trace-1"
+    assert verification[0].run_id == "run-1"
+    assert verification[0].action_id == "action-1"
+    assert verification[0].attributes["report_fingerprint"] == "report-blocked"
+
+    assert [event.event_type for event in events][-4:] == [
+        "containment_requested",
+        "capability_revoked",
+        "containment_enforced",
+        "containment_certified",
+    ]
+
+
+def test_verified_review_does_not_contain():
+    service = __import__("agent_containment.control", fromlist=["ContainmentService"]).ContainmentService()
+    service.register("agent-1")
+    action = Action("agent-1", "action-1", "publish", "memo")
+
+    decision = service.authorize_verified(
+        action,
+        signal(disposition="requireReview"),
+    )
+
+    assert decision.decision is DecisionType.PAUSE
+    assert service.status("agent-1").value == "active"
+    assert service.incident("agent-1") is None
+
+
+def test_verification_cannot_override_base_policy_deny():
+    service = __import__("agent_containment.control", fromlist=["ContainmentService"]).ContainmentService()
+    service.register("agent-1")
+    action = Action("agent-1", "action-1", "read", "workspace", risk=99)
+
+    decision = service.authorize_verified(
+        action,
+        signal(disposition="allow"),
+    )
+
+    assert decision.decision is DecisionType.DENY
+    assert service.status("agent-1").value == "active"
