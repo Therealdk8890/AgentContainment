@@ -251,13 +251,14 @@ class ContainmentService:
             # incident persistence fails after containment, a fresh controller
             # can still reconstruct the fail-closed boundary from this fence.
             self.fences.prepare(agent_id, next_epoch)
+            incident_id = self._incident_id(agent_id, next_epoch)
+            self._emit_event("containment_requested", agent_id=agent_id, incident_id=incident_id, containment_epoch=next_epoch, reason="controller containment requested")
             report = managed.containment.contain()
             # Identity credentials are leases over an executable trust epoch.
             # Once the runtime fence succeeds, every credential issued before
             # containment must become unusable, including after recovery.
             self._revoke_identity(managed)
-            incident_id = self._incident_id(agent_id, report.epoch)
-
+            self._emit_event("capability_revoked", agent_id=agent_id, incident_id=incident_id, containment_epoch=report.epoch, reason="identity credentials revoked at containment")
             # The containment decision is authoritative even when persistence
             # is degraded. Record the fact first; proof/audit is downstream.
             incident_persistence_failure: str | None = None
@@ -331,6 +332,7 @@ class ContainmentService:
                 raise RuntimeError("runtime is not contained")
             if managed.runtime.epoch != incident.containment_epoch:
                 raise RuntimeError("runtime epoch does not match durable containment")
+            self._emit_event("recovery_requested", agent_id=agent_id, incident_id=incident.incident_id, containment_epoch=incident.containment_epoch)
             return RecoveryAuthorization(
                 agent_id=agent_id,
                 containment_epoch=incident.containment_epoch,
@@ -359,6 +361,8 @@ class ContainmentService:
                 raise RuntimeError("runtime is not contained")
             if managed.runtime.epoch != incident.containment_epoch:
                 raise RuntimeError("runtime epoch does not match durable containment")
+
+            self._emit_event("recovery_authorized", agent_id=agent_id, incident_id=incident.incident_id, containment_epoch=incident.containment_epoch, reason="controller recovery authorization accepted")
 
             # Remove the durable admission fence before enabling execution.
             # If fence persistence fails, recovery stops while the runtime
@@ -417,6 +421,7 @@ class ContainmentService:
                 except Exception:
                     # Incident state remains authoritative; audit is downstream proof.
                     pass
+            self._emit_event("recovery_completed", agent_id=agent_id, incident_id=incident.incident_id, containment_epoch=incident.containment_epoch, attributes={"recovery_epoch": epoch})
             return epoch
 
     def incident(self, agent_id: str) -> IncidentRecord | None:
