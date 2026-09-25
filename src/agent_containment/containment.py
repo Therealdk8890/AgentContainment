@@ -90,6 +90,43 @@ class ContainmentReport:
         return ProofReceipt.issue(payload, secret)
 
 
+@dataclass(frozen=True)
+class RecoveryReport:
+    """Evidence for a fail-closed recovery transaction."""
+
+    agent_id: str
+    contained_epoch: int
+    events: tuple[str, ...]
+    failures: tuple[str, ...] = ()
+    recontainment_failures: tuple[str, ...] = ()
+    recovered_epoch: int | None = None
+
+    @property
+    def successful(self) -> bool:
+        return self.recovered_epoch is not None and not self.failures
+
+    @property
+    def proof_status(self) -> str:
+        return "verified" if self.successful and not self.recontainment_failures else "degraded"
+
+    def to_receipt(self, secret: bytes, *, execution_id: str | None = None,
+                   policy_id: str | None = None, receipt_id: str | None = None) -> ProofReceipt:
+        payload = {
+            "schema_version": 1,
+            "receipt_id": receipt_id or f"{self.agent_id}:recover:{self.contained_epoch}:{uuid.uuid4()}",
+            "execution_id": execution_id,
+            "agent_id": self.agent_id,
+            "contained_epoch": self.contained_epoch,
+            "recovered_epoch": self.recovered_epoch,
+            "events": list(self.events),
+            "failures": list(self.failures),
+            "recontainment_failures": list(self.recontainment_failures),
+            "recovery_result": "completed" if self.successful else "aborted",
+            "proof_status": self.proof_status,
+        }
+        return ProofReceipt.issue(payload, secret)
+
+
 
 class ContainmentController:
     def __init__(self, runtime: Runtime, capabilities: CapabilitySet | None = None,
@@ -104,6 +141,7 @@ class ContainmentController:
         self.kernel_egress = kernel_egress
         self.enforcers = list(enforcers or [])
         self.last_report: ContainmentReport | None = None
+        self.last_recovery_report: RecoveryReport | None = None
 
     def attach_egress(self, egress) -> None:
         self.egress = egress
@@ -212,21 +250,48 @@ class ContainmentController:
     def recover(self, capability, expected_epoch: int) -> int:
         """Release external enforcement before allowing runtime recovery.
 
-        Recovery is fail-closed: if any enforcement boundary cannot be released
-        and verified, the runtime remains contained and compensation is attempted.
+        Recovery is fail-closed: failed release or runtime recovery triggers
+        compensation and leaves the runtime contained. Evidence is retained
+        in ``last_recovery_report``.
         """
+        contained_epoch = self.runtime.epoch
+        events = ["recovery_requested"]
         release_failures = self.release_enforcers()
         if release_failures:
-            self.recontain_enforcers()
-            raise RuntimeError(
-                "recovery aborted; runtime remains contained: "
-                + "; ".join(release_failures)
+            events.append("external_release_failed")
+            recontainment_failures = self.recontain_enforcers()
+            events.append("recontainment_verified" if not recontainment_failures else "recontainment_degraded")
+            self.last_recovery_report = RecoveryReport(
+                agent_id=self.runtime.agent_id,
+                contained_epoch=contained_epoch,
+                events=tuple(events),
+                failures=release_failures,
+                recontainment_failures=recontainment_failures,
             )
+            raise RuntimeError("recovery aborted; runtime remains contained: " + "; ".join(release_failures))
+        events.append("external_release_verified")
         try:
-            return self.runtime.recover(capability, expected_epoch)
-        except Exception:
-            self.recontain_enforcers()
+            recovered_epoch = self.runtime.recover(capability, expected_epoch)
+        except Exception as exc:
+            events.append("runtime_recovery_failed")
+            recontainment_failures = self.recontain_enforcers()
+            events.append("recontainment_verified" if not recontainment_failures else "recontainment_degraded")
+            self.last_recovery_report = RecoveryReport(
+                agent_id=self.runtime.agent_id,
+                contained_epoch=contained_epoch,
+                events=tuple(events),
+                failures=(f"{type(exc).__name__}: {exc}",),
+                recontainment_failures=recontainment_failures,
+            )
             raise
+        events.append("runtime_recovery_complete")
+        self.last_recovery_report = RecoveryReport(
+            agent_id=self.runtime.agent_id,
+            contained_epoch=contained_epoch,
+            events=tuple(events),
+            recovered_epoch=recovered_epoch,
+        )
+        return recovered_epoch
 
     def recontain_enforcers(self) -> tuple[str, ...]:
         """Best-effort compensation after a failed recovery transaction."""
