@@ -16,3 +16,8 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+  "integration: tests requiring a real host boundary or privileged runtime",
+]
