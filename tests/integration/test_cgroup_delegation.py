@@ -37,6 +37,7 @@ def test_non_root_process_uses_delegated_cgroup_subtree():
     child = None
     outside = None
     outside_pid = None
+    outside_process = None
 
     child_code = r"""
 import os
@@ -116,7 +117,7 @@ marker.write_text("passed", encoding="utf-8")
         outside_pid = outside_process.pid
         (outside / "cgroup.procs").write_text(f"{outside_pid}\n")
 
-                child = subprocess.Popen(
+        child = subprocess.Popen(
             [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid)],
 
             stdin=subprocess.DEVNULL,
@@ -135,7 +136,7 @@ marker.write_text("passed", encoding="utf-8")
         if child is not None and child.poll() is None:
             child.kill()
             child.wait(timeout=3)
-        if outside_process.poll() is None:
+        if outside_process is not None and outside_process.poll() is None:
             outside_process.kill()
             outside_process.wait(timeout=3)
         for path in (parent / "agents", parent, outside):
