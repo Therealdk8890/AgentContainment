@@ -29,6 +29,7 @@ def test_linux_ebpf_enforcer_invokes_controller(monkeypatch, tmp_path: Path):
     calls = []
 
     class Result:
+        returncode = 0
         stderr = ""
         stdout = ""
 
