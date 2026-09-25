@@ -6,6 +6,7 @@ from .governance_event import GovernanceEvent
 from .enforcer import Enforcer, EnforcementResult, EnforcementStatus, NoopEnforcer
 from .gateway import ActionGateway
 from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
+from .governance_event import GovernanceEvent
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
@@ -14,7 +15,7 @@ from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 __all__ = [
     "Action", "ActionGateway", "Decision", "DecisionType",
     "ContainmentService", "ManagedAgent", "RecoveryAuthorization",
-    "IncidentRecord", "IncidentRegistry", "IncidentState",
+    "IncidentRecord", "IncidentRegistry", "IncidentState", "GovernanceEvent",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
