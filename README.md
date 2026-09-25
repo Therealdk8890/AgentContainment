@@ -1,211 +1,165 @@
 # AgentContainment
 
-**Control and enforcement layer for an AI agent governance stack.**
+**Runtime containment and enforcement primitives for AI agents.**
 
-AgentContainment provides the control side of a broader agent-governance loop: authorize actions, detect policy violations, halt compromised runs, revoke authority, contain blast radius, verify external enforcement, and preserve verifiable incident evidence.
+[![PyPI](https://img.shields.io/pypi/v/agentcontainment?label=PyPI)](https://pypi.org/project/agentcontainment/)
+[![Python](https://img.shields.io/pypi/pyversions/agentcontainment?label=Python)](https://pypi.org/project/agentcontainment/)
+[![License](https://img.shields.io/github/license/Therealdk8890/AgentContainment)](https://github.com/Therealdk8890/AgentContainment/blob/main/LICENSE)
 
-Paired with provenance and claim-verification layers such as DProvenanceKit and ClaimProofKit, it forms a closed governance loop:
+> **Status: Early research/prototype — not production ready.**
 
-`Observe → Prove → Authorize → Enforce → Contain → Recover → Regression`
+AgentContainment is a controller-side security layer for AI agents. It is designed for the moment when an agent can no longer be trusted to enforce its own boundaries.
 
-The architectural goal is not a collection of unrelated security libraries. It is a composable governance stack in which DProvenanceKit explains **what happened**, AgentContainment enforces **what was allowed**, ClaimProofKit verifies **what is supported by evidence**, and incidents become durable inputs to **future regression tests**. It is intentionally provider-neutral: platform enforcement can be supplied by cgroup v2/eBPF, Cilium, Tetragon, or another independently verifiable enforcement system.
+The core idea is simple:
 
-**Keywords:** AI agent security, agent containment, autonomous agent security, AI runtime security, agent security control plane, AI agent firewall, agent firewall, AI agent sandbox, agent sandboxing, AI guardrails, agent governance, AI safety, runtime enforcement, action authorization, policy enforcement, kill switch, incident response, blast radius containment, enforcement verification, Cilium, CiliumNetworkPolicy, Kubernetes network policy, Tetragon, eBPF, Linux cgroups, cgroup v2, zero trust, defense in depth, tamper-evident audit, security engineering, open source AI security.
+> **Don't ask the agent to obey the boundary. Put the boundary outside the agent — then verify that it was enforced.**
 
-## Governance stack
+AgentContainment separates **agent intent**, **controller authority**, **external enforcement**, and **incident evidence** so that no single compromised agent process is trusted to authorize, contain, recover, or rewrite its own security state.
 
-```text
-                    AI GOVERNANCE STACK
-                           |
-              +------------+------------+
-              |                         |
-        PROVENANCE / PROOF        CONTROL / ENFORCEMENT
-        DProvenanceKit            AgentContainment
-              |                         |
-        What happened?             What is allowed?
-        Evidence                   Halt / revoke
-        Regression                 Contain / recover
-              |                         |
-              +------------+------------+
-                           |
-                    GOVERNANCE LOOP
-                           |
-                 Incident → Evidence
-                           |
-                    Regression gate
-```
+## At a glance
 
-The integration point is intentional:
+~~~
+                         AGENT
+                           │
+                           │ request action
+                           ▼
+                 ┌─────────────────────┐
+                 │  AGENTCONTAINMENT   │
+                 │   CONTROL PLANE     │
+                 │                     │
+                 │ authorize           │
+                 │ fence / revoke      │
+                 │ contain / recover   │
+                 │ record evidence     │
+                 └──────────┬──────────┘
+                            │
+                 enforce → verify → certify
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+          cgroup v2       eBPF         Cilium /
+          process       egress        Tetragon
+          boundary      boundary      integrations
+              └─────────────┼─────────────┘
+                            ▼
+                    EXTERNAL BOUNDARY
+                            │
+                            ▼
+                     VERIFIED STATE
+                            │
+                            ▼
+                    AUDIT / EVIDENCE
+                            │
+                            ▼
+                         WARDEN
+                    read-only observer
+~~~
 
-- **Provenance** records the action, decision, evidence, and resulting incident state.
-- **Containment** can consume provenance-linked incident context while retaining independent authority to halt the runtime.
-- **Recovery** remains controller-authorized rather than agent-authorized.
-- **Incidents** can be converted into deterministic regression cases so a previously observed failure becomes a future release gate.
+The controller owns the containment decision and recovery authority. Enforcement is delegated to independently verifiable mechanisms rather than being treated as a property of the agent's prompt, framework, or tool wrapper.
 
-See [`docs/GOVERNANCE_PLATFORM.md`](docs/GOVERNANCE_PLATFORM.md) for the platform architecture and implementation roadmap.
+## Why it exists
 
-### Governance integration contract
+Traditional agent guardrails often live inside the application executing the agent. That creates a difficult security question:
 
-The open-source stack is intentionally modular:
+**What happens when the agent itself becomes untrusted?**
 
-```text
-             GOVERNANCE CONTRACT
-                    │
-        +-----------+-----------+
-        ▼           ▼           ▼
- DProvenanceKit  AgentContainment  ClaimProofKit
-    PROVE           CONTROL          VERIFY
-        \             │             /
-         \            │            /
-          +------ regression ------+
-```
+AgentContainment is built around a different trust boundary:
 
-AgentContainment emits controller-owned `GovernanceEvent` records and can
-export incidents as `RegressionFixture` cases. Downstream provenance and
-claim-verification systems can attach evidence and support decisions without
-becoming the containment or recovery authority.
+~~~
+Agent requests
+      │
+      ▼
+Controller authorizes
+      │
+      ▼
+External mechanism enforces
+      │
+      ▼
+Independent verification
+      │
+      ▼
+Controller-owned evidence
+      │
+      ▼
+Warden observes
+~~~
 
+The project is deliberately concerned with the distinction between **asking an agent to stop** and **having an independent mechanism capable of stopping it**.
 
+## Core security model
 
-## Why this is interesting
+AgentContainment follows:
 
-This project is deliberately trying to solve a harder problem than **“put guardrails around the agent.”**
+**Detect → Prove → Halt → Contain → Map → Recover**
 
-The interesting boundary is what happens when the agent itself is no longer trustworthy.
+The containment plane is designed to remain outside the agent's trust boundary.
 
-An agent can request an action. A verification layer can determine whether the supporting claim is acceptable. A controller can make the authorization decision. An external mechanism can enforce containment at the host or network boundary. Independent evidence can then show what actually happened.
+### Controller authority
 
-That gives the stack a concrete chain:
+The controller owns:
 
-```text
-ACTION
-  ↓
-CLAIM VERIFICATION
-  ↓
-AUTHORIZATION
-  ↓
-EXTERNAL ENFORCEMENT
-  ↓
-INDEPENDENT VERIFICATION
-  ↓
-PROVENANCE / EVIDENCE
-  ↓
-WARDEN OBSERVATION
-```
+- action authorization;
+- stateful policy history;
+- admission and epoch fencing;
+- capability revocation;
+- containment and recovery decisions;
+- enforcement verification state;
+- controller-owned audit evidence.
 
-The important part is that **no step is allowed to quietly impersonate another step**.
+An agent does **not** receive authority over its own kill switch, containment policy, controller credentials, or incident evidence.
 
-- **ClaimProofKit** answers: *Is the action supported by acceptable claims?*
-- **AgentContainment** answers: *Was the action authorized, and what happens when containment is required?*
-- **The external enforcer** answers: *Was the boundary actually applied?*
-- **DProvenanceKit** answers: *Can the decision and resulting state be reconstructed and proved?*
-- **Warden** answers: *Can an operator see the chain without being given authority to change it?*
+### Defense in depth
 
-Milestone 7 also moved the project beyond a purely simulated enforcement story: the trusted CI path exercises the Linux/eBPF containment boundary on a real Linux host and independently verifies the pinned enforcement link and post-containment behavior.
+No single mechanism is treated as sufficient:
 
-That does **not** make the system production-ready. It makes the engineering question more interesting: the project is now testing the boundary between an agent's intent, a controller's authority, an external enforcement mechanism, and independently reconstructable evidence.
-
-> **Don't ask the agent to obey the boundary. Put the boundary outside the agent — then prove the boundary was actually enforced.**
-
-## Installation
-
-
-AgentContainment is packaged as a standard Python distribution. The first public PyPI release is planned after release validation; until then, install the current development version directly from GitHub:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install "git+https://github.com/Therealdk8890/AgentContainment.git"
-```
-
-After the first PyPI release, the intended installation path will be:
-
-```bash
-python -m pip install agentcontainment
-```
-
-The core package has no third-party runtime dependencies. Linux-specific enforcement providers may require host capabilities and external tools such as eBPF/libbpf or Cilium/Kubernetes; those are deployment requirements rather than core Python dependencies.
-## Core model
-
-`Detect → Prove → Halt → Contain → Map → Recover`
-
-The containment plane is designed to sit **outside the agent's trust boundary**. An agent must not control its own kill switch, containment policy, credentials, or incident evidence.
-
-## Why AgentContainment
-
-Traditional agent guardrails often operate inside the application or framework executing the agent. AgentContainment is designed around a different security boundary:
-
-> **The agent requests an action. The controller decides whether it is allowed. The enforcement layer can then stop the runtime and its network egress independently of the agent.**
-
-This separation is intended to remain useful when an agent is compromised, misbehaving, or attempting to bypass its normal tool wrapper.
-
-### cgroup v2 provider
-
-The optional `CgroupV2Enforcer` adapts a dedicated Linux cgroup v2 workload boundary to the provider-neutral enforcement interface. It uses `cgroup.kill` for containment and verifies state through `cgroup.events`. Configured cgroups are identity-bound using filesystem metadata so a deleted-and-recreated path is not silently accepted as the original workload boundary. An empty cgroup is treated as evidence that the current workload has exited; the AgentContainment durable admission fence remains the controller-owned authority that prevents recovery without explicit authorization.
-
-This adapter is a Linux enforcement integration, not a claim that the Python control plane alone provides kernel-level isolation. Production deployments should provision and protect the cgroup hierarchy outside the agent trust boundary and validate the privileged integration on the target host.
-
-### Cilium provider
-
-The optional `CiliumNetworkPolicyEnforcer` integrates the same provider contract with Kubernetes/Cilium. It creates a namespace-scoped `CiliumNetworkPolicy` for the configured workload selector and denies ingress and egress. It does not add a Kubernetes client dependency to the core library; the adapter invokes `kubectl` without a shell and verifies the live policy object before reporting containment. Release deletes the policy and verifies that it is absent. The enforcer also queries matching `CiliumEndpoint` resources and requires realized policy enforcement for both ingress and egress before certifying containment. A Kubernetes policy object alone is therefore not treated as sufficient proof of enforcement. Production deployments should still pair this with Cilium health checks and an independent process-containment mechanism.
-
-## Enforcement layers
-
-AgentContainment uses defense in depth:
-
-1. **Action authorization** — deterministic policy decisions before tool execution.
-2. **Stateful policy** — controller-owned action history can detect sequences where individually permitted actions become dangerous collectively.
+1. **Action authorization** — deterministic decisions before tool execution.
+2. **Stateful policy** — action history can detect dangerous sequences.
 3. **Epoch fencing** — containment invalidates outstanding execution and egress leases.
 4. **Capability revocation** — application-level authority is revoked during containment.
-5. **Process containment** — Linux cgroup v2 can terminate the contained cgroup with `cgroup.kill`.
-6. **Kernel egress enforcement** — the Linux eBPF integration can attach a cgroup egress program that drops outbound packets.
-7. **Tamper-evident evidence** — controller-owned audit events are recorded in a hash chain.
+5. **Process containment** — Linux cgroup v2 can terminate the contained cgroup.
+6. **Kernel egress enforcement** — the Linux eBPF integration can block outbound packets.
+7. **Tamper-evident evidence** — controller-owned audit events are linked in a hash chain.
 
-No single layer is treated as sufficient.
+## What is actually enforced?
 
-## Provider-neutral enforcement architecture
+AgentContainment uses a provider-neutral enforcement contract.
 
-AgentContainment owns the **containment decision, durable admission fence, recovery authority, and enforcement verification state**. It does not require a particular kernel or network security product.
+~~~
+                 REQUEST CONTAINMENT
+                          │
+                          ▼
+                     ENFORCE
+                          │
+                          ▼
+                     VERIFY
+                          │
+                          ▼
+                 CERTIFY CONTAINED
+~~~
 
-The enforcement boundary is intentionally pluggable:
+A provider is not considered successful merely because a command or API request was accepted. Providers report explicit states such as:
 
-```text
-                    AgentContainment
-             control plane / recovery authority
-                          |
-                 containment decision
-                          v
-              +-----------+-----------+
-              |           |           |
-           Cilium      Tetragon    cgroup/eBPF
-           network      runtime       process/
-          enforcement  enforcement    egress
-              |           |           |
-              +-----------+-----------+
-                          v
-                    OS / network
-                          |
-                          v
-                     Verification
-```
+- ENFORCED
+- VERIFICATION_FAILED
+- DEGRADED
+- NOT_CONFIGURED
 
-The controller follows:
+Current and planned enforcement targets include:
 
-```text
-REQUEST CONTAINMENT → ENFORCE → VERIFY → CERTIFY CONTAINED
-```
+| Provider | Boundary | Role |
+|---|---|---|
+| **cgroup v2** | Process / workload | Linux process containment |
+| **eBPF** | Network egress | Kernel-level egress enforcement |
+| **Cilium** | Kubernetes network | Optional network enforcement integration |
+| **Tetragon** | Runtime / kernel | Optional runtime enforcement integration |
 
-A provider is not considered successfully enforced merely because a command or API request was accepted. Providers return an explicit status such as `ENFORCED`, `VERIFICATION_FAILED`, `DEGRADED`, or `NOT_CONFIGURED`.
+Cilium and Tetragon are **optional integration targets**, not dependencies of the core package.
 
-Cilium and Tetragon are **optional integration targets, not dependencies of the core library**. AgentContainment is not intended to replace either project's kernel-level enforcement or telemetry capabilities. Its role is to provide an agent-level safety state machine and independent recovery boundary above those mechanisms.
+## Stateful policy
 
-For the current provider API, see `src/agent_containment/enforcer.py`.
+Policies can reason about sequences rather than isolated actions.
 
-## Stateful policy enforcement
-
-Policies can reason about action sequences rather than only individual actions.
-
-```python
+~~~python
 from agent_containment.policy import PolicyEngine, SequenceRule
 
 policy = PolicyEngine(sequence_rules=[
@@ -214,52 +168,53 @@ policy = PolicyEngine(sequence_rules=[
         ("download_file", "upload_file", "delete_file"),
     )
 ])
-```
+~~~
 
-The controller can therefore allow:
+The controller can allow:
 
-```text
+~~~
 download_file → ALLOW
 upload_file   → ALLOW
-```
+~~~
 
-while halting the third action when the complete sequence is observed:
+and halt the third action:
 
-```text
+~~~
 delete_file → HALT
-```
+~~~
 
-The policy history is maintained by the controller rather than being supplied by the agent.
+The policy history belongs to the controller rather than being supplied by the agent.
 
 ## Standalone control plane
 
-The repository includes a Unix-domain control transport and client for separating the agent from the controller process.
+The repository includes a Unix-domain control transport that separates the agent from the controller process.
 
-```text
+~~~
 Agent
-  |
-  | Unix domain socket
-  v
+  │
+  │ Unix-domain socket
+  ▼
 agentcontainmentd
-  |
-  +-- peer credential authorization
-  +-- action policy
-  +-- stateful policy history
-  +-- containment authority
-  +-- audit/evidence
-  |
-  v
+  │
+  ├── peer-credential authorization
+  ├── action policy
+  ├── stateful policy history
+  ├── containment authority
+  └── audit / evidence
+  │
+  ▼
 OS enforcement boundary
-  |
-  +-- cgroup v2
-  +-- eBPF cgroup egress enforcement
-```
+  ├── cgroup v2
+  └── eBPF cgroup egress enforcement
+~~~
 
 The daemon exposes a deliberately narrow control protocol for registration, authorization, status, containment, reports, and snapshots.
 
-## OS-level containment
+## Linux enforcement
 
-On Linux, production deployments can place an agent and its descendants in a dedicated cgroup v2. Containment can then:
+On Linux, a workload can be placed in a dedicated cgroup v2.
+
+Containment can then:
 
 - invalidate application and egress leases;
 - revoke application capabilities;
@@ -267,29 +222,32 @@ On Linux, production deployments can place an agent and its descendants in a ded
 - terminate the contained cgroup;
 - preserve controller-owned evidence and telemetry paths.
 
-The strongest guarantees depend on deployment privileges, cgroup configuration, kernel support, and correct isolation. AgentContainment does **not** claim that completed external side effects can be reversed.
+The cgroup provider uses cgroup.kill for containment and verifies state through cgroup.events. Configured cgroups are identity-bound so a deleted-and-recreated path is not silently accepted as the original workload boundary.
 
-See `docs/OS_LEVEL_CONTAINMENT.md` and `docs/EGRESS_CONTAINMENT.md` for the security model and limitations.
+**Important:** this is not a claim that the Python control plane alone provides kernel-level isolation. Production deployments must provision and protect the cgroup hierarchy outside the agent trust boundary and validate the privileged integration on the target host.
 
-## Audit evidence
+See:
 
-The controller can maintain a JSONL hash chain linking each event to the previous event. Verification detects edits, deletion, and reordering of the recorded chain.
+- docs/OS_LEVEL_CONTAINMENT.md
+- docs/EGRESS_CONTAINMENT.md
 
-This is **tamper-evident**, not immutable storage: an attacker with authority to rewrite both the audit file and its trusted reference can rewrite the evidence. External anchoring is a future hardening layer.
+## Warden: eyes, not hands
 
-## Agent hierarchy
+Warden is the observation boundary above the control path.
 
-`AgentTree` models parent/child agents and propagates containment through currently registered descendants. Child capabilities are attenuated to the intersection requested by the child and held by the parent.
+> **Warden gets eyes, not hands.**
 
-This provides a foundation for multi-agent containment without assuming that every child has the same authority as its parent.
+Warden can observe and display the governance chain, but it does not:
 
-## Milestone 8 — Warden observation
+- authorize actions;
+- contain agents;
+- release containment;
+- mutate enforcement state;
+- approve recovery.
 
-Milestone 7 established real-host Linux/eBPF containment and independent enforcement verification. Milestone 8 adds the observability boundary above that control path.
+The intended chain is:
 
-**Warden gets eyes, not hands.** Warden observes and displays the governance chain; it does not authorize actions, contain agents, release containment, mutate enforcement state, or approve recovery.
-
-```text
+~~~
 ACTION
   ↓
 CLAIM VERIFICATION
@@ -301,36 +259,169 @@ EXTERNAL ENFORCEMENT
 EVIDENCE
   ↓
 WARDEN OBSERVATION
-```
+~~~
 
 The security invariant is:
 
 > **Warden observation must be incapable of changing authorization or containment state.**
 
-The provider-neutral observation contract is implemented by `WardenObservation`. See [`docs/MILESTONE_8_WARDEN.md`](docs/MILESTONE_8_WARDEN.md) for the acceptance criterion and integration plan.
+See docs/MILESTONE_8_WARDEN.md.
 
-## Status
+## Governance stack
 
-**Early research/prototype, with real-host enforcement proof established for the current Linux/eBPF path.** The project is currently focused on deterministic authorization, stateful action policy, runtime fencing, provider-neutral enforcement verification, containment, child-agent propagation, OS-level Linux enforcement, incident evidence, and the Milestone 8 observation boundary. Cilium/Tetragon remain optional integrations rather than core dependencies.
+AgentContainment is designed to compose with adjacent governance layers rather than replace them.
 
-The project should not yet be treated as a production security boundary without validating the host deployment, privilege model, identity binding, policy coverage, and kernel enforcement configuration.
+~~~
+                  AI GOVERNANCE STACK
+
+        ┌──────────────────┐
+        │  DProvenanceKit  │
+        │      PROVE       │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │ AgentContainment │
+        │     CONTROL      │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │  ClaimProofKit   │
+        │      VERIFY      │
+        └────────┬─────────┘
+                 │
+                 ▼
+          REGRESSION GATE
+                 │
+                 ▼
+              INCIDENT
+                 │
+                 └──────► evidence / future tests
+~~~
+
+The broader governance loop is:
+
+**Observe → Prove → Authorize → Enforce → Contain → Recover → Regression**
+
+The projects have deliberately separate responsibilities:
+
+- **DProvenanceKit** — reconstructs and proves what happened.
+- **AgentContainment** — controls what is allowed and what happens when containment is required.
+- **ClaimProofKit** — verifies whether claims are supported by evidence.
+- **Warden** — provides read-only observation.
+
+No component is intended to quietly impersonate another component's authority.
+
+## Audit evidence
+
+The controller can maintain a JSONL hash chain linking each event to the previous event.
+
+Verification can detect:
+
+- edits;
+- deletion;
+- reordering of the recorded chain.
+
+This is **tamper-evident**, not immutable storage. An attacker who can rewrite both the audit file and its trusted reference can rewrite the evidence. External anchoring remains a future hardening layer.
+
+## Agent hierarchy
+
+AgentTree models parent/child agents and propagates containment through currently registered descendants.
+
+Child capabilities are attenuated to the intersection of the capabilities requested by the child and held by the parent.
+
+This provides a foundation for multi-agent containment without assuming that every child has the same authority as its parent.
+
+## Installation
+
+### PyPI
+
+The first public release is now available:
+
+~~~bash
+python -m pip install agentcontainment
+~~~
+
+Verify the installed distribution:
+
+~~~bash
+python -c "from importlib.metadata import version; print(version('agentcontainment'))"
+~~~
+
+Expected:
+
+~~~text
+0.1.0
+~~~
+
+The core package has no third-party runtime dependencies.
+
+Linux-specific enforcement providers may require host capabilities and external tooling such as eBPF/libbpf or Cilium/Kubernetes. Those are deployment requirements rather than core Python dependencies.
+
+### Development install
+
+~~~bash
+git clone https://github.com/Therealdk8890/AgentContainment.git
+cd AgentContainment
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+~~~
+
+## Security and production scope
+
+**AgentContainment 0.1.0 is an early research/prototype release. It is not a production-grade universal security boundary.**
+
+The current release demonstrates concrete controller/enforcement boundaries, including real-host Linux/eBPF validation in the trusted CI path, but deployment guarantees depend on the environment.
+
+Before production use, validate at minimum:
+
+- host privileges;
+- kernel and cgroup support;
+- cgroup hierarchy ownership and protection;
+- identity binding;
+- policy coverage;
+- enforcement configuration;
+- recovery procedures;
+- external side effects that cannot be reversed after execution.
+
+AgentContainment does **not** claim that completed external side effects can be undone.
+
+## Tests
+
+The repository contains:
+
+- unit and security tests under tests/;
+- privileged Linux integration tests under tests/integration/;
+- real-host enforcement validation for the Linux/eBPF path;
+- regression fixtures for previously observed incidents;
+- release-gate replay tests.
+
+Privileged tests are opt-in and intended for isolated Linux environments.
 
 ## Repository layout
 
-- `src/agent_containment/` — core library and controller components
-- `ebpf/` — Linux eBPF enforcement program and controller
-- `policies/` — example policy
-- `demo/` — controlled rogue-agent demonstration
-- `tests/` — security and behavior tests
-- `tests/integration/` — opt-in privileged Linux integration tests
-- `docs/` — architecture, threat model, and containment notes
-- `scripts/` — build and development helpers
+- src/agent_containment/ — core library and controller components
+- ebpf/ — Linux eBPF enforcement program and controller
+- policies/ — example policies
+- demo/ — controlled rogue-agent demonstration
+- tests/ — security and behavior tests
+- tests/integration/ — opt-in privileged Linux integration tests
+- docs/ — architecture, threat model, and containment notes
+- scripts/ — build and development helpers
 
-## Safety
+## Roadmap
 
-The demo uses a simulated environment. It does not execute destructive actions against real infrastructure.
+The project is intentionally evolving toward a broader provider-neutral agent security control plane.
 
-Privileged integration tests are opt-in and intended for isolated Linux environments.
+Near-term areas include:
+
+- deeper enforcement-provider integrations;
+- broader incident-to-regression workflows;
+- stronger external evidence anchoring;
+- deployment hardening and operational guidance;
+- additional multi-agent containment scenarios.
 
 ## License
 
