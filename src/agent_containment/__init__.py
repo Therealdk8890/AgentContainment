@@ -11,6 +11,7 @@ from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .regression import RegressionFixture
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
+from .verification_signal import VerificationSignal, decision_from_verification
 
 __all__ = [
     "Action", "ActionGateway", "Decision", "DecisionType",
@@ -20,4 +21,5 @@ __all__ = [
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
     "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "RegressionFixture",
+    "VerificationSignal", "decision_from_verification",
 ]
