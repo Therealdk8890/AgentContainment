@@ -280,3 +280,25 @@ def test_privileged_commands_fail_closed_without_uid_configuration(tmp_path):
             {"command": "contain", "agent_id": "agent-1"},
             peer_uid=os.getuid() + 1,
         )
+
+
+def test_transport_returns_clean_timeout_for_stalled_peer(tmp_path):
+    server_sock, client_sock = socket.socketpair()
+    server_sock.settimeout(0.01)
+
+    class FakeListener:
+        def accept(self):
+            return server_sock, None
+
+    server = UnixControlServer(ContainmentService(), tmp_path / "controller.sock")
+    server._sock = FakeListener()
+    try:
+        thread = threading.Thread(target=server.serve_once)
+        thread.start()
+        data = client_sock.recv(4096)
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert json.loads(data.decode()) == {"ok": False, "error": "request_timeout"}
+    finally:
+        client_sock.close()
+        server_sock.close()

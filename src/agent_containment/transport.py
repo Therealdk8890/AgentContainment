@@ -78,19 +78,33 @@ class UnixControlServer:
             raise RuntimeError("server is not started")
         conn, _ = self._sock.accept()
         with conn:
+            # Read one bounded protocol frame before sending an authorization
+            # response. Rejecting immediately after accept can race a valid
+            # client's first send: the controller closes the socket before the
+            # client has delivered its request and the client observes
+            # BrokenPipeError instead of the protocol-level unauthorized_peer
+            # response. Authentication still occurs before JSON parsing or
+            # command dispatch, so untrusted peers never reach controller
+            # semantics.
+            conn.settimeout(2.0)
+            data = bytearray()
+            try:
+                while len(data) <= self.max_message_bytes:
+                    chunk = conn.recv(min(4096, self.max_message_bytes + 1 - len(data)))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if b"\n" in chunk:
+                        break
+            except socket.timeout:
+                self._send(conn, {"ok": False, "error": "request_timeout"})
+                return
+
             peer_uid, peer_pid = self._peer_credentials(conn)
             if not self._peer_allowed(peer_uid):
                 self._send(conn, {"ok": False, "error": "unauthorized_peer"})
                 return
-            conn.settimeout(2.0)
-            data = bytearray()
-            while len(data) <= self.max_message_bytes:
-                chunk = conn.recv(min(4096, self.max_message_bytes + 1 - len(data)))
-                if not chunk:
-                    break
-                data.extend(chunk)
-                if b"\n" in chunk:
-                    break
+
             if len(data) > self.max_message_bytes:
                 self._send(conn, {"ok": False, "error": "message_too_large"})
                 return
