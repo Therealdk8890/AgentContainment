@@ -37,7 +37,8 @@ jobs:
         run: PYTHONPATH=src python -m pytest -q tests/test_epoch_fencing_adversarial.py
       - name: Verify proof receipt integrity and adversarial tamper detection
         run: PYTHONPATH=src python -m pytest -q tests/test_proof_receipt.py tests/test_containment_receipt_integration.py tests/test_recovery_transaction.py
-
+      - name: Verify hostile-agent evidence schema
+        run: PYTHONPATH=src python -m pytest -q tests/test_hostile_agent_evidence.py
       - name: Verify fixture files are valid JSON
         run: python -m json.tool tests/fixtures/regression/secret-exfiltration.json >/dev/null
 
@@ -48,15 +49,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install eBPF build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
-      - name: Build eBPF containment controller
-        run: bash scripts/build_ebpf.sh
+      - run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
+      - run: bash scripts/build_ebpf.sh
 
-  # This job uses sudo and is intentionally restricted to pushes to the
-  # repository. A maintainer-controlled branch push is the trusted path for
-  # exercising the real-host boundary; never execute privileged test code
-  # from untrusted PRs/forks.
   ebpf-privileged-integration:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -68,12 +63,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Linux eBPF dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
-      - name: Build eBPF containment controller
-        run: bash scripts/build_ebpf.sh
-      - name: Install package and test dependencies
-        run: python -m pip install . pytest
+      - run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
+      - run: bash scripts/build_ebpf.sh
+      - run: python -m pip install . pytest
       - name: Capture trusted host and privilege context
         run: |
           {
@@ -88,7 +80,7 @@ jobs:
       - name: Run trusted privileged containment, isolation, and kernel egress adversarial tests
         run: |
           set -o pipefail
-          sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH"             pytest -q -rs tests/integration/test_linux_ebpf.py tests/integration/test_controller_isolation.py tests/integration/test_cgroup_delegation.py             2>&1 | sudo tee -a privileged-integration.log
+          sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH" pytest -q -rs tests/integration/test_linux_ebpf.py tests/integration/test_controller_isolation.py tests/integration/test_cgroup_delegation.py 2>&1 | sudo tee -a privileged-integration.log
       - name: Run hostile-agent demonstration
         run: |
           set -o pipefail
@@ -98,7 +90,6 @@ jobs:
         run: |
           test -f hostile-agent-evidence.json
           python -m json.tool hostile-agent-evidence.json >/dev/null
-
       - name: Upload privileged integration evidence
         if: always()
         uses: actions/upload-artifact@v4
