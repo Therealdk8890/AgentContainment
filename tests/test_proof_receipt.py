@@ -51,6 +51,23 @@ def test_receipt_detects_payload_tampering(mutation):
     assert not ReceiptVerifier(SECRET).verify(forged)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda p: p["adversarial_events"].pop(0),
+        lambda p: p["adversarial_events"].reverse(),
+        lambda p: p["adversarial_events"].insert(0, "fake_event"),
+    ],
+)
+def test_receipt_detects_event_sequence_tampering(mutation):
+    receipt = ProofReceipt.issue(PAYLOAD, SECRET)
+    tampered = copy.deepcopy(receipt.payload)
+    mutation(tampered)
+    forged = ProofReceipt(tampered, receipt.digest, receipt.signature)
+
+    assert not forged.verify(SECRET)
+
+
 def test_receipt_detects_digest_or_signature_tampering():
     receipt = ProofReceipt.issue(PAYLOAD, SECRET)
 
