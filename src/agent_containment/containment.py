@@ -72,7 +72,7 @@ class ContainmentReport:
         """Create an authenticated receipt from this containment evidence."""
         payload = {
             "schema_version": 1,
-            "receipt_id": receipt_id or f"{self.agent_id}:contain:{self.epoch}",
+            "receipt_id": receipt_id or f"{self.agent_id}:contain:{self.epoch}:{uuid.uuid4()}",
             "execution_id": execution_id,
             "agent_id": self.agent_id,
             "epoch": self.epoch,
