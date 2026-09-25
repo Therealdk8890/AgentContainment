@@ -27,11 +27,18 @@ jobs:
       - name: Validate package metadata
         run: python -m twine check dist/*
 
+      - name: Verify source distribution contents
+        run: python -m twine check dist/*
+
       - name: Install wheel in a clean environment
         run: |
           python -m venv /tmp/agentcontainment-release-test
           /tmp/agentcontainment-release-test/bin/python -m pip install dist/*.whl
           /tmp/agentcontainment-release-test/bin/python -c "import agent_containment; print('agentcontainment import OK')"
+
+      - name: Verify installed package metadata
+        run: |
+          /tmp/agentcontainment-release-test/bin/python -c "from importlib.metadata import version; assert version(\"agentcontainment\") == \"0.1.0\""
 
       - name: Show release artifacts
         run: ls -lh dist/
