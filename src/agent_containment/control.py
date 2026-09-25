@@ -17,6 +17,7 @@ from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
 from .runtime import Runtime, RuntimeState
 from .runtime_fence import RuntimeFenceRegistry
+from .verification_signal import VerificationSignal, decision_from_verification
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,66 @@ class ContainmentService:
                          action_id=action.action_id, policy_decision_id=action.action_id,
                          reason=decision.reason,
                          attributes={"decision": decision.decision.value})
+        return decision
+
+    def authorize_verified(self, action: Action, signal: VerificationSignal, *, identity_token: str | None = None,
+                           peer_pid: int | None = None,
+                           cgroup_membership: Callable[[int, str], bool] | None = None) -> Decision:
+        """Authorize an action using verifier output without delegating control authority.
+
+        Normal controller authorization remains the first gate. A verifier
+        cannot elevate a denied action. A bound block becomes a controller
+        HALT and immediately enters durable containment; review becomes PAUSE.
+        """
+        if signal.action_id is not None and signal.action_id != action.action_id:
+            decision = decision_from_verification(action, signal)
+            self._emit_event(
+                "verification_evaluated", agent_id=action.agent_id,
+                trace_id=signal.trace_id, run_id=signal.run_id,
+                action_id=action.action_id, policy_decision_id=action.action_id,
+                reason=decision.reason,
+                attributes={"disposition": signal.disposition,
+                            "report_fingerprint": signal.report_fingerprint,
+                            "policy_fingerprint": signal.policy_fingerprint,
+                            "blocking_claim_ids": list(signal.blocking_claim_ids),
+                            "review_claim_ids": list(signal.review_claim_ids),
+                            "supported_claim_count": signal.supported_claim_count,
+                            "total_claim_count": signal.total_claim_count,
+                            "signal_version": signal.version},
+            )
+            return decision
+
+        base = self.authorize(
+            action,
+            identity_token=identity_token,
+            peer_pid=peer_pid,
+            cgroup_membership=cgroup_membership,
+        )
+        if base.decision is not DecisionType.ALLOW:
+            decision = base
+        else:
+            decision = decision_from_verification(action, signal)
+            if decision.decision is DecisionType.HALT:
+                self._managed(action.agent_id).containment.halt()
+
+        self._emit_event(
+            "verification_evaluated", agent_id=action.agent_id,
+            trace_id=signal.trace_id, run_id=signal.run_id,
+            action_id=action.action_id, policy_decision_id=action.action_id,
+            reason=decision.reason,
+            attributes={"disposition": signal.disposition,
+                        "report_fingerprint": signal.report_fingerprint,
+                        "policy_fingerprint": signal.policy_fingerprint,
+                        "blocking_claim_ids": list(signal.blocking_claim_ids),
+                        "review_claim_ids": list(signal.review_claim_ids),
+                        "supported_claim_count": signal.supported_claim_count,
+                        "total_claim_count": signal.total_claim_count,
+                        "signal_version": signal.version,
+                        "base_decision": base.decision.value},
+        )
+
+        if base.decision is DecisionType.ALLOW and decision.decision is DecisionType.HALT:
+            self.contain(action.agent_id)
         return decision
 
     def unregister(self, agent_id: str) -> None:
