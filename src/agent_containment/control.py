@@ -271,8 +271,6 @@ class ContainmentService:
             decision = base
         else:
             decision = decision_from_verification(action, signal)
-            if decision.decision is DecisionType.HALT:
-                self._managed(action.agent_id).containment.halt()
 
         self._emit_event(
             "verification_evaluated", agent_id=action.agent_id,
