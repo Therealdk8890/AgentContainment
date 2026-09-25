@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from time import monotonic
+import uuid
 from .credentials import CredentialStore
 from .enforcer import Enforcer, EnforcementStatus
 from .runtime import Runtime, RuntimeState
