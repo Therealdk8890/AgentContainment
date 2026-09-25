@@ -32,7 +32,9 @@ jobs:
         run: bash scripts/build_ebpf.sh
 
   # This job uses sudo and is intentionally restricted to pushes to the
-  # repository. Never execute privileged test code from untrusted PRs/forks.
+  # repository. A maintainer-controlled branch push is the trusted path for
+  # exercising the real-host boundary; never execute privileged test code
+  # from untrusted PRs/forks.
   ebpf-privileged-integration:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
