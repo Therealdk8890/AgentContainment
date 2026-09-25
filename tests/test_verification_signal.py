@@ -84,6 +84,7 @@ def test_verified_review_does_not_contain():
     service.register("agent-1")
     action = Action("agent-1", "action-1", "publish", "memo")
 
+    service.authorize = lambda action, **kwargs: Decision(action.action_id, DecisionType.ALLOW, "test authorization")
     decision = service.authorize_verified(
         action,
         signal(disposition="requireReview"),
