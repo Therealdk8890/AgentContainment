@@ -180,6 +180,25 @@ class ContainmentController:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
         return tuple(failures)
 
+    def recover(self, capability, expected_epoch: int) -> int:
+        """Release external enforcement before allowing runtime recovery.
+
+        Recovery is fail-closed: if any enforcement boundary cannot be released
+        and verified, the runtime remains contained and compensation is attempted.
+        """
+        release_failures = self.release_enforcers()
+        if release_failures:
+            self.recontain_enforcers()
+            raise RuntimeError(
+                "recovery aborted; runtime remains contained: "
+                + "; ".join(release_failures)
+            )
+        try:
+            return self.runtime.recover(capability, expected_epoch)
+        except Exception:
+            self.recontain_enforcers()
+            raise
+
     def recontain_enforcers(self) -> tuple[str, ...]:
         """Best-effort compensation after a failed recovery transaction."""
         failures: list[str] = []
