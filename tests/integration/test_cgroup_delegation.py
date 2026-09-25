@@ -147,8 +147,8 @@ marker.write_text("passed", encoding="utf-8")
         marker.unlink(missing_ok=True)
 
 
-def test_real_systemd_delegate_yes_creates_controller_owned_subtree():
-    """Prove an actual systemd Delegate=yes unit can manage its cgroup subtree."""
+def test_real_systemd_delegate_yes_enforces_boundary_and_containment():
+    """Prove actual systemd delegation blocks sibling migration and permits containment."""
     if sys.platform != "linux":
         pytest.skip("Linux systemd integration test")
     if os.geteuid() != 0:
@@ -172,6 +172,10 @@ def test_real_systemd_delegate_yes_creates_controller_owned_subtree():
 
     unit = f"agentcontainment-delegation-test-{os.getpid()}"
     source_root = Path(__file__).resolve().parents[2]
+    cgroup_root = Path("/sys/fs/cgroup")
+    outside = cgroup_root / f"agent-containment-systemd-outside-{os.getpid()}"
+    outside_process = None
+
     child_code = r"""
 import os
 import subprocess
@@ -197,6 +201,14 @@ if not supervisor.pid_in_cgroup(workload.pid, agent):
 if not supervisor.is_populated(agent):
     raise SystemExit("systemd-delegated cgroup is not populated")
 
+outside_pid = int(sys.argv[1])
+try:
+    supervisor.attach_pid(agent, outside_pid)
+except PermissionError:
+    pass
+else:
+    raise SystemExit("systemd delegated controller crossed its cgroup boundary")
+
 supervisor.contain(agent)
 try:
     workload.wait(timeout=3)
@@ -210,7 +222,14 @@ if supervisor.is_populated(agent):
 
 supervisor.remove(agent)
 """
+
     try:
+        outside.mkdir()
+        outside_process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+        )
+        (outside / "cgroup.procs").write_text(f"{outside_process.pid}\n")
+
         result = subprocess.run(
             [
                 "systemd-run",
@@ -227,6 +246,7 @@ supervisor.remove(agent)
                 sys.executable,
                 "-c",
                 child_code,
+                str(outside_process.pid),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -235,6 +255,16 @@ supervisor.remove(agent)
             check=False,
         )
         assert result.returncode == 0, result.stderr + result.stdout
+
+        delegate = subprocess.run(
+            ["systemctl", "show", unit, "--property=Delegate", "--value"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        assert delegate.returncode == 0, delegate.stderr
+        assert delegate.stdout.strip() == "yes"
     finally:
         subprocess.run(
             ["systemctl", "stop", unit],
@@ -242,3 +272,10 @@ supervisor.remove(agent)
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        if outside_process is not None and outside_process.poll() is None:
+            outside_process.kill()
+            outside_process.wait(timeout=3)
+        try:
+            outside.rmdir()
+        except OSError:
+            pass
