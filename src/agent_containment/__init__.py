@@ -10,6 +10,7 @@ from .incident_state import IncidentRecord, IncidentRegistry, IncidentState
 from .linux_supervisor import LinuxCgroupSupervisor
 from .models import Action, Decision, DecisionType
 from .policy import PolicyEngine
+from .provenance import InMemoryProvenanceSink, ProvenanceEmitter, ProvenanceRecord, ProvenanceSink, provenance_record
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
 from .warden_observation import WardenObservation
 
@@ -18,6 +19,7 @@ __all__ = [
     "BootstrapAdmissionError", "require_controller_available",
     "ContainmentService", "ManagedAgent", "RecoveryAuthorization",
     "IncidentRecord", "IncidentRegistry", "IncidentState", "GovernanceEvent",
+    "ProvenanceRecord", "ProvenanceSink", "ProvenanceEmitter", "InMemoryProvenanceSink", "provenance_record",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
