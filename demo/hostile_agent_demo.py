@@ -66,6 +66,8 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
 
 
 def _write_evidence(evidence: list[dict[str, object]], result: str | None = None) -> None:
+    if not evidence:
+        raise ValueError("cannot produce hostile-agent evidence without recorded tests")
     derived_result = "contained" if all(
         item.get("result") == "passed" and item.get("exit_code") == 0 for item in evidence
     ) else "failed"
