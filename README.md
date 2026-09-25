@@ -223,6 +223,32 @@ This is **tamper-evident**, not immutable storage: an attacker with authority to
 
 This provides a foundation for multi-agent containment without assuming that every child has the same authority as its parent.
 
+## Milestone 8 — Warden observation
+
+Milestone 7 established real-host Linux/eBPF containment and independent enforcement verification. Milestone 8 adds the observability boundary above that control path.
+
+**Warden gets eyes, not hands.** Warden observes and displays the governance chain; it does not authorize actions, contain agents, release containment, mutate enforcement state, or approve recovery.
+
+```text
+ACTION
+  ↓
+CLAIM VERIFICATION
+  ↓
+AUTHORIZATION
+  ↓
+EXTERNAL ENFORCEMENT
+  ↓
+EVIDENCE
+  ↓
+WARDEN OBSERVATION
+```
+
+The security invariant is:
+
+> **Warden observation must be incapable of changing authorization or containment state.**
+
+The provider-neutral observation contract is implemented by `WardenObservation`. See [`docs/MILESTONE_8_WARDEN.md`](docs/MILESTONE_8_WARDEN.md) for the acceptance criterion and integration plan.
+
 ## Status
 
 **Early research/prototype.** The project is currently focused on deterministic authorization, stateful action policy, runtime fencing, provider-neutral enforcement verification, containment, child-agent propagation, OS-level Linux enforcement, incident evidence, and optional Cilium network enforcement. Cilium/Tetragon remain optional integrations rather than core dependencies.
