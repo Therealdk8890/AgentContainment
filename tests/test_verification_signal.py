@@ -250,7 +250,7 @@ def test_review_timeout_never_grants_execution_and_can_escalate():
     service.authorize = lambda action, **kwargs: Decision(action.action_id, DecisionType.ALLOW, "test authorization")
     action = Action("agent-review", "review-action", "publish", "memo")
 
-    decision = service.authorize_verified(action, signal(disposition="requireReview"))
+    decision = service.authorize_verified(action, signal(disposition="requireReview", actionID="review-action"))
     assert decision.decision is DecisionType.PAUSE
 
     review_events = []
