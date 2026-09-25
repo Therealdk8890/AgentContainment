@@ -14,9 +14,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: pip install pytest
+      - run: python -m pip install .
+      - run: python -m pip install pytest
       - name: Run test suite with a hard timeout and verbose progress
-        run: timeout --signal=TERM --kill-after=10s 120s env PYTHONPATH=src pytest -vv
+        run: timeout --signal=TERM --kill-after=10s 120s pytest -vv
 
   ebpf-build:
     runs-on: ubuntu-latest
@@ -35,6 +36,7 @@ jobs:
   ebpf-privileged-integration:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -46,7 +48,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang libbpf-dev pkg-config
       - name: Build eBPF containment controller
         run: bash scripts/build_ebpf.sh
-      - name: Install Python test dependencies
-        run: python -m pip install pytest
+      - name: Install package and test dependencies
+        run: python -m pip install . pytest
       - name: Run privileged containment adversarial tests
         run: sudo env AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src PATH="$PATH" pytest -q tests/integration/test_linux_ebpf.py
