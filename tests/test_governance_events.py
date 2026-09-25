@@ -1,5 +1,7 @@
 from agent_containment import GovernanceEvent
 from agent_containment.control import ContainmentService
+from agent_containment.containment import ContainmentController
+from agent_containment.enforcer import EnforcementResult, EnforcementStatus
 
 
 def test_governance_event_serialization_is_stable():
@@ -20,7 +22,27 @@ def test_governance_event_serialization_is_stable():
 def test_containment_emits_controller_lifecycle_events():
     events = []
     service = ContainmentService(event_sink=events.append)
-    service.register("agent-1")
+    runtime = service.register("agent-1")
+
+    class VerifiedEnforcer:
+        name = "test-external"
+
+        def contain(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def verify_contained(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def release(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+        def verify_released(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+    service.configure_containment(
+        "agent-1",
+        ContainmentController(runtime, enforcers=[VerifiedEnforcer()]),
+    )
 
     report = service.contain("agent-1")
     assert report.complete
