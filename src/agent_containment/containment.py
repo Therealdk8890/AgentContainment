@@ -19,10 +19,16 @@ class ContainmentReport:
     stages: tuple[str, ...]
     failures: tuple[str, ...]
     persistence_failures: tuple[str, ...] = ()
+    external_verified: bool = False
 
     @property
     def complete(self) -> bool:
         return not self.failures
+
+    @property
+    def certified(self) -> bool:
+        """Whether containment has independent external verification evidence."""
+        return self.complete and self.external_verified
 
     @property
     def durable(self) -> bool:
@@ -94,6 +100,7 @@ class ContainmentController:
         if self.process_containment is not None:
             enforce("processes_contained", self.process_containment.contain)
 
+        verified_enforcers = 0
         for enforcer in self.enforcers:
             provider = getattr(enforcer, "name", type(enforcer).__name__)
             try:
@@ -113,6 +120,7 @@ class ContainmentController:
                     )
                 else:
                     stages.append(f"enforcer:{provider}:verified")
+                    verified_enforcers += 1
             except Exception as exc:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
 
@@ -121,6 +129,7 @@ class ContainmentController:
             epoch=self.runtime.epoch,
             stages=tuple(stages),
             failures=tuple(failures),
+            external_verified=bool(self.enforcers) and verified_enforcers == len(self.enforcers),
         )
         self.last_report = report
         return report
