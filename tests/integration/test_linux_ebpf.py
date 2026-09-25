@@ -56,6 +56,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
     marker = marker_dir / "connected"
     blocked = marker_dir / "blocked"
     escaped = marker_dir / "escaped"
+    attempted = marker_dir / "attempted"
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -76,6 +77,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         "s.close()\n"
         "if sys.stdin.readline().strip() != 'go': sys.exit(2)\n"
         "try:\n"
+        "    open(sys.argv[8],'w').write('attempted')\n"
         "    s=socket.create_connection((sys.argv[2],int(sys.argv[3])),timeout=1)\n"
         "    s.sendall(b'post-containment')\n"
         "    open(sys.argv[7],'w').write('escaped')\n"
@@ -91,7 +93,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         child = subprocess.Popen(
             [
                 sys.executable, "-c", child_code, str(group), host, str(port),
-                str(ready), str(marker), str(blocked), str(escaped),
+                str(ready), str(marker), str(blocked), str(escaped), str(attempted),
             ],
             stdin=subprocess.PIPE,
             text=True,
@@ -134,6 +136,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         child.stdin.write("go\n")
         child.stdin.flush()
 
+        _wait_for_file(attempted)
         _wait_for_file(blocked)
         assert not escaped.exists()
 
@@ -164,7 +167,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         except OSError:
             pass
         server.close()
-        for p in (marker, blocked, escaped, marker_dir / "ready"):
+        for p in (marker, blocked, escaped, attempted, marker_dir / "ready"):
             p.unlink(missing_ok=True)
         try:
             pin_dir.rmdir()
