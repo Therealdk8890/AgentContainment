@@ -3,6 +3,7 @@ from time import monotonic
 from .credentials import CredentialStore
 from .enforcer import Enforcer, EnforcementStatus
 from .runtime import Runtime, RuntimeState
+from .proof_receipt import ProofReceipt
 
 
 @dataclass
@@ -60,6 +61,33 @@ class ContainmentReport:
             provider_applied_at=self.provider_applied_at,
             independently_verified_at=self.independently_verified_at,
         )
+    def to_receipt(
+        self,
+        secret: bytes,
+        *,
+        execution_id: str | None = None,
+        policy_id: str | None = None,
+        receipt_id: str | None = None,
+    ) -> ProofReceipt:
+        """Create an authenticated receipt from this containment evidence."""
+        payload = {
+            "schema_version": 1,
+            "receipt_id": receipt_id or f"{self.agent_id}:contain:{self.epoch}",
+            "execution_id": execution_id,
+            "agent_id": self.agent_id,
+            "epoch": self.epoch,
+            "policy_id": policy_id,
+            "stages": list(self.stages),
+            "failures": list(self.failures),
+            "persistence_failures": list(self.persistence_failures),
+            "external_verified": self.external_verified,
+            "containment_requested_at": self.containment_requested_at,
+            "provider_applied_at": self.provider_applied_at,
+            "independently_verified_at": self.independently_verified_at,
+            "proof_status": "verified" if self.certified and self.durable else "degraded",
+        }
+        return ProofReceipt.issue(payload, secret)
+
 
 
 class ContainmentController:
