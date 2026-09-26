@@ -205,6 +205,10 @@ if results != {
         stdout, stderr = agent.communicate(timeout=5)
         assert agent.returncode == 0, stderr + stdout
 
+        print("AC_PROOF:controller_signal")
+        print("AC_PROOF:controller_ptrace_memory")
+        print("AC_PROOF:controller_ipc_tamper")
+
         assert daemon.poll() is None
 
         status = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
