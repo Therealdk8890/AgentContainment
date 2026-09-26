@@ -25,6 +25,7 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "tests",
     "attack_matrix",
     "claims",
+    "proof_markers",
 }
 
 EXPECTED_ATTACKS = {
@@ -52,6 +53,7 @@ def _complete_evidence(result="passed", exit_code=0):
             "test_path": nodeid,
             "test_nodeid": nodeid,
             "attacks_covered": attacks,
+            "proof_ids": attacks,
             "result": result,
             "exit_code": exit_code,
             "duration_seconds": 0.1,
@@ -73,6 +75,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
 
     attacks = {item["attack"]: item["expected"] for item in payload["attack_matrix"]}
     assert attacks == EXPECTED_ATTACKS
+    assert payload["proof_markers"] == sorted(EXPECTED_ATTACKS)
 
     test_paths = {item["test_path"] for item in payload["tests"]}
     nodeids = {item["test_nodeid"] for item in payload["tests"]}
