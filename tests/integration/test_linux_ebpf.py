@@ -14,6 +14,7 @@ from agent_containment.containment import ContainmentController
 from agent_containment.control import ContainmentService
 from agent_containment.egress_enforcement import LinuxEbpfExternalEnforcer
 from agent_containment.process import LinuxCgroupProcessContainment
+from agent_containment.proof import record_proof
 from agent_containment.runtime import Runtime, RuntimeState
 from agent_containment.warden_observer import WardenObserver
 
@@ -184,7 +185,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert containment_events
         assert containment_events[-1]["external_verified"] is True
         assert containment_events[-1]["complete"] is True
-        print("AC_PROOF:post_containment_egress")
+        record_proof("post_containment_egress")
     finally:
         if child is not None and child.poll() is None:
             child.kill()
@@ -256,7 +257,7 @@ def test_controller_containment_kills_hostile_cgroup_process():
         assert "processes_contained" in report.stages
         child.wait(timeout=3)
         assert child.returncode is not None
-        print("AC_PROOF:cgroup_workload_containment")
+        record_proof("cgroup_workload_containment")
     finally:
         if child is not None and child.poll() is None:
             child.kill()
