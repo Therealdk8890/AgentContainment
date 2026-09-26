@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentcontainment?label=Python)](https://pypi.org/project/agentcontainment/)
 [![License](https://img.shields.io/github/license/Therealdk8890/AgentContainment)](https://github.com/Therealdk8890/AgentContainment/blob/main/LICENSE)
 
-> **Status: Early research/prototype — not production ready.**
+> **Status: Early-stage, actively developed toward production 1.0.**
 
 AgentContainment is a controller-side security layer for AI agents. It is designed for the moment when an agent can no longer be trusted to enforce its own boundaries.
 
@@ -85,6 +85,21 @@ Warden observes
 ~~~
 
 The project is deliberately concerned with the distinction between **asking an agent to stop** and **having an independent mechanism capable of stopping it**.
+
+## Why this matters to enterprise systems
+
+Autonomous agents increasingly interact with systems where a mistaken or compromised action can have consequences outside the model itself: source repositories, internal services, credentials, cloud resources, production workloads, and external networks.
+
+AgentContainment addresses that trust problem at the runtime boundary:
+
+- **Reduce blast radius** by placing enforcement outside the agent process.
+- **Fail closed** when required enforcement cannot be established or verified.
+- **Separate authority** so an agent cannot grant itself containment or recovery authority.
+- **Invalidate stale authority** through epoch fencing and capability revocation.
+- **Generate evidence** that records what the controller observed and what enforcement provider reported.
+- **Integrate with existing infrastructure** through provider-neutral enforcement contracts.
+
+These capabilities are intended to support security evaluation, controlled deployment, incident response, and governance workflows. They are **not** a claim of automatic SOC 2, HIPAA, or other regulatory compliance; compliance depends on the complete deployment, controls, processes, and applicable requirements.
 
 ## Core security model
 
@@ -371,7 +386,7 @@ python -m pip install -e .
 
 ## Security and production scope
 
-**AgentContainment 0.1.0 is an early research/prototype release. It is not a production-grade universal security boundary.**
+**AgentContainment 0.1.0 is an early-stage release. It is not a production-grade universal security boundary.**
 
 The current release demonstrates concrete controller/enforcement boundaries, including real-host Linux/eBPF validation in the trusted CI path, but deployment guarantees depend on the environment.
 
@@ -442,6 +457,39 @@ HMAC receipts do **not** provide asymmetric non-repudiation, universal replay de
 
 See docs/SECURITY_CONTRACT.md for the current recovery evidence contract and trust model.
 
+## Commercial path
+
+AgentContainment is intentionally open at the enforcement layer. The project does not require a proprietary runtime to establish its core security model.
+
+A future commercial offering can build above the open-source engine around operational capabilities that become important when organizations manage many contained workloads, such as:
+
+- centralized fleet and policy management;
+- enterprise identity and RBAC;
+- SSO/SAML/OIDC integration;
+- SIEM and security-platform integrations;
+- centralized evidence retention and search;
+- deployment automation and fleet health;
+- enterprise support, security reviews, and integration assistance.
+
+These are **potential product directions, not features promised by the current 0.1.0 release**.
+
+The near-term priority is to establish reproducible enforcement evidence, measurable behavior, and deployment hardening before defining a production commercial tier.
+
+## Enterprise & integration
+
+AgentContainment is available for security evaluation and integration work as the project develops toward production 1.0.
+
+Organizations interested in:
+
+- evaluating the runtime enforcement model;
+- integrating AgentContainment with existing infrastructure;
+- validating privileged Linux enforcement;
+- discussing deployment architecture or custom enforcement requirements;
+
+can contact the project maintainers.
+
+Enterprise support and commercial product capabilities will be introduced only as the underlying enforcement and verification model reaches the required maturity.
+
 ## Repository layout
 
 - src/agent_containment/ — core library and controller components
@@ -457,13 +505,26 @@ See docs/SECURITY_CONTRACT.md for the current recovery evidence contract and tru
 
 The project is intentionally evolving toward a broader provider-neutral agent security control plane.
 
-Near-term areas include:
+### Enforcement and verification
 
 - deeper enforcement-provider integrations;
-- broader incident-to-regression workflows;
+- measurable enforcement and detection latency;
+- broader adversarial escape testing;
 - stronger external evidence anchoring;
-- deployment hardening and operational guidance;
-- additional multi-agent containment scenarios.
+- deployment hardening and operational guidance.
+
+### Governance and recovery
+
+- broader incident-to-regression workflows;
+- additional multi-agent containment scenarios;
+- stronger recovery verification;
+- clearer operational evidence and review tooling.
+
+### Production 1.0
+
+Production readiness will require demonstrated behavior on supported environments, reproducible privileged validation, documented security invariants, and explicit deployment limitations.
+
+Commercial platform capabilities will follow the maturity of those underlying controls rather than substitute for them.
 
 ## License
 
