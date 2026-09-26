@@ -11,7 +11,7 @@
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir> | verify <pin-dir>\n", prog);
+    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir> | verify <pin-dir> <cgroup>\n", prog);
 }
 
 static int ensure_dir(const char *path)
@@ -91,18 +91,69 @@ static int detach_program(const char *pin_dir)
     return 0;
 }
 
-static int verify_program(const char *pin_dir)
+static int verify_program(const char *pin_dir, const char *cgroup_path)
 {
     char link_path[PATH_MAX];
     snprintf(link_path, sizeof(link_path), "%s/egress_link", pin_dir);
 
-    int fd = bpf_obj_get(link_path);
-    if (fd < 0) {
+    int link_fd = bpf_obj_get(link_path);
+    if (link_fd < 0) {
         fprintf(stderr, "pinned egress link is not available: %s\n", strerror(errno));
         return -1;
     }
-    close(fd);
-    printf("verified pinned egress link at %s\n", link_path);
+
+    struct bpf_link_info info = {};
+    __u32 info_len = sizeof(info);
+    if (bpf_obj_get_info_by_fd(link_fd, &info, &info_len) < 0) {
+        fprintf(stderr, "unable to inspect pinned egress link: %s\n", strerror(errno));
+        close(link_fd);
+        return -1;
+    }
+
+    if (info.type != BPF_LINK_TYPE_CGROUP ||
+        info.cgroup.attach_type != BPF_CGROUP_INET_EGRESS) {
+        fprintf(stderr, "pinned object is not a cgroup egress link\n");
+        close(link_fd);
+        return -1;
+    }
+
+    int cgroup_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (cgroup_fd < 0) {
+        fprintf(stderr, "open target cgroup %s failed: %s\n",
+                cgroup_path, strerror(errno));
+        close(link_fd);
+        return -1;
+    }
+
+    __u32 prog_ids[64] = {};
+    __u32 prog_cnt = 64;
+    __u32 attach_flags = 0;
+    if (bpf_prog_query(cgroup_fd, BPF_CGROUP_INET_EGRESS, 0,
+                       &attach_flags, prog_ids, &prog_cnt) < 0) {
+        fprintf(stderr, "unable to query target cgroup egress programs: %s\n",
+                strerror(errno));
+        close(cgroup_fd);
+        close(link_fd);
+        return -1;
+    }
+
+    int found = 0;
+    for (__u32 i = 0; i < prog_cnt; ++i) {
+        if (prog_ids[i] == info.prog_id) {
+            found = 1;
+            break;
+        }
+    }
+
+    close(cgroup_fd);
+    close(link_fd);
+
+    if (!found) {
+        fprintf(stderr, "pinned egress link is not attached to target cgroup\n");
+        return -1;
+    }
+
+    printf("verified pinned egress link at %s for %s\n", link_path, cgroup_path);
     return 0;
 }
 
@@ -118,8 +169,8 @@ int main(int argc, char **argv)
         return detach_program(argv[2]) == 0 ? 0 : 1;
     }
     if (strcmp(argv[1], "verify") == 0) {
-        if (argc != 3) { usage(argv[0]); return 2; }
-        return verify_program(argv[2]) == 0 ? 0 : 1;
+        if (argc != 4) { usage(argv[0]); return 2; }
+        return verify_program(argv[2], argv[3]) == 0 ? 0 : 1;
     }
     usage(argv[0]);
     return 2;

@@ -144,6 +144,19 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert runtime.state is RuntimeState.CONTAINED
         assert not runtime.lease_valid(lease)
 
+        wrong_group = root / f"agent-containment-wrong-target-{os.getpid()}"
+        wrong_group.mkdir()
+        try:
+            wrong_verify = subprocess.run(
+                [str(controller), "verify", str(pin_dir), str(wrong_group)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert wrong_verify.returncode != 0
+        finally:
+            wrong_group.rmdir()
+
         observed_types = [observation.observed_event_type for observation in observer.snapshot()]
         assert observed_types[:2] == ["agent_registered", "containment_requested"]
         assert "capability_revoked" in observed_types
