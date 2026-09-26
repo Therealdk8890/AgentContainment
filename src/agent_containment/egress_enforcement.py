@@ -112,6 +112,18 @@ class LinuxEbpfExternalEnforcer:
 
     def contain(self, agent_id: str) -> EnforcementResult:
         self._release_verified = False
+        # A controller restart must reconcile an existing pinned link rather
+        # than replacing it. Replacing/unpinning first can orphan live kernel
+        # enforcement or destroy the only durable reference to it.
+        if (self._pin_dir / "egress_link").exists():
+            verification = self.verify_contained(agent_id)
+            if verification.status is EnforcementStatus.ENFORCED:
+                return verification
+            return EnforcementResult(
+                self.name,
+                EnforcementStatus.DEGRADED,
+                verification.detail or "existing pinned eBPF link could not be reconciled",
+            )
         try:
             self._kernel.contain()
             return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
