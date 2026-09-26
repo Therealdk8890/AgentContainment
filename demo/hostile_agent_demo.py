@@ -26,11 +26,7 @@ TESTS = [
     {
         "name": "controller isolation",
         "path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
-        "attacks": (
-            "controller_signal",
-            "controller_ptrace_memory",
-            "controller_ipc_tamper",
-        ),
+        "attacks": ("controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"),
     },
     {
         "name": "cgroup delegation boundary",
@@ -38,12 +34,14 @@ TESTS = [
         "attacks": ("cross_boundary_cgroup_migrate",),
     },
     {
-        "name": "kernel egress + process containment",
-        "path": "tests/integration/test_linux_ebpf.py",
-        "attacks": (
-            "cgroup_workload_containment",
-            "post_containment_egress",
-        ),
+        "name": "process containment",
+        "path": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
+        "attacks": ("cgroup_workload_containment",),
+    },
+    {
+        "name": "kernel egress containment",
+        "path": "tests/integration/test_linux_ebpf.py::test_linux_ebpf_blocks_subprocess_egress_after_containment",
+        "attacks": ("post_containment_egress",),
     },
     {
         "name": "stale execution lease fencing",
@@ -61,12 +59,12 @@ ATTACK_MATRIX = (
     {
         "attack": "controller_ptrace_memory",
         "expected": "denied",
-        "test_path": "tests/integration/test_controller_isolation.py",
+        "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
     },
     {
         "attack": "controller_ipc_tamper",
         "expected": "denied",
-        "test_path": "tests/integration/test_controller_isolation.py",
+        "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
     },
     {
         "attack": "cross_boundary_cgroup_migrate",
@@ -92,6 +90,8 @@ ATTACK_MATRIX = (
 
 
 def _run(test: dict[str, object], evidence: list[dict[str, object]]) -> int:
+    label = str(test["name"])
+    path = str(test["path"])
     print(f"\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
     started = time.monotonic()
