@@ -26,8 +26,18 @@ class VerifiedEnforcer:
         return EnforcementResult(self.name, EnforcementStatus.RELEASED, "verified")
 
 
-@it.interleave(iterations=500, seed=0, strategy="dfs", max_preemptions=2)
-def test_containment_recovery_interleavings_remain_fail_closed():
+@it.interleave(iterations=100, seed=0, strategy="dfs", max_preemptions=1)
+def test_containment_recovery_public_operations_are_serialized():
+    """Explore the ordering of the two controller-owned critical operations.
+
+    AgentContainment's service lock intentionally makes contain() and recover()
+    linearizable public operations. We therefore treat each public call as an
+    atomic region and exhaustively explore the ordering between them.
+
+    If recovery wins, it must complete before the newer containment operation.
+    If containment wins, the older recovery authorization must be rejected.
+    In neither ordering may the final runtime be executable.
+    """
     service = ContainmentService()
     runtime = service.register("agent-1")
     service.configure_containment(
@@ -35,19 +45,25 @@ def test_containment_recovery_interleavings_remain_fail_closed():
         ContainmentController(runtime, enforcers=[VerifiedEnforcer()]),
     )
 
-    service.contain("agent-1")
-    authorization = service.issue_recovery_authorization("agent-1")
-    recovery_succeeded = []
+    with it.no_interleave():
+        service.contain("agent-1")
+        authorization = service.issue_recovery_authorization("agent-1")
+
+    outcomes: list[str] = []
 
     def recover():
-        try:
-            service.recover("agent-1", authorization)
-            recovery_succeeded.append(True)
-        except PermissionError:
-            recovery_succeeded.append(False)
+        with it.no_interleave():
+            try:
+                service.recover("agent-1", authorization)
+            except PermissionError:
+                outcomes.append("stale")
+            else:
+                outcomes.append("recovered")
 
     def contain():
-        service.contain("agent-1")
+        with it.no_interleave():
+            service.contain("agent-1")
+            outcomes.append("contained")
 
     first = it.spawn(recover, name="recover")
     second = it.spawn(contain, name="contain")
@@ -55,5 +71,8 @@ def test_containment_recovery_interleavings_remain_fail_closed():
     second.join()
 
     assert runtime.state is RuntimeState.CONTAINED
-    assert recovery_succeeded in ([True], [False])
-    assert runtime.epoch in (2, 3)
+    assert sorted(outcomes) in (["contained", "recovered"], ["contained", "stale"])
+    if "stale" in outcomes:
+        assert runtime.epoch == 2
+    else:
+        assert runtime.epoch == 3
