@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 TESTS = [
     {
         "name": "controller isolation",
-        "path": "tests/integration/test_controller_isolation.py",
+        "path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
         "attacks": (
             "controller_signal",
             "controller_ptrace_memory",
@@ -34,7 +34,7 @@ TESTS = [
     },
     {
         "name": "cgroup delegation boundary",
-        "path": "tests/integration/test_cgroup_delegation.py",
+        "path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
         "attacks": ("cross_boundary_cgroup_migrate",),
     },
     {
@@ -47,7 +47,7 @@ TESTS = [
     },
     {
         "name": "stale execution lease fencing",
-        "path": "tests/test_epoch_fencing_adversarial.py",
+        "path": "tests/test_epoch_fencing_adversarial.py::test_stale_execution_lease_cannot_cross_containment_or_recovery",
         "attacks": ("stale_execution_lease",),
     },
 ]
@@ -56,7 +56,7 @@ ATTACK_MATRIX = (
     {
         "attack": "controller_signal",
         "expected": "denied",
-        "test_path": "tests/integration/test_controller_isolation.py",
+        "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
     },
     {
         "attack": "controller_ptrace_memory",
@@ -71,27 +71,27 @@ ATTACK_MATRIX = (
     {
         "attack": "cross_boundary_cgroup_migrate",
         "expected": "denied",
-        "test_path": "tests/integration/test_cgroup_delegation.py",
+        "test_path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
     },
     {
         "attack": "cgroup_workload_containment",
         "expected": "enforced",
-        "test_path": "tests/integration/test_linux_ebpf.py",
+        "test_path": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
     },
     {
         "attack": "post_containment_egress",
         "expected": "denied",
-        "test_path": "tests/integration/test_linux_ebpf.py",
+        "test_path": "tests/integration/test_linux_ebpf.py::test_linux_ebpf_blocks_subprocess_egress_after_containment",
     },
     {
         "attack": "stale_execution_lease",
         "expected": "invalidated",
-        "test_path": "tests/test_epoch_fencing_adversarial.py",
+        "test_path": "tests/test_epoch_fencing_adversarial.py::test_stale_execution_lease_cannot_cross_containment_or_recovery",
     },
 )
 
 
-def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
+def _run(test: dict[str, object], evidence: list[dict[str, object]]) -> int:
     print(f"\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
     started = time.monotonic()
@@ -102,14 +102,11 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
     duration = time.monotonic() - started
     status = "PASS" if result.returncode == 0 else "FAIL"
     print(f"[{status}] {label}")
-    test = next(
-        item for item in TESTS
-        if item["name"] == label and item["path"] == path
-    )
     evidence.append(
         {
             "name": label,
             "test_path": path,
+            "test_nodeid": path,
             "attacks_covered": list(test["attacks"]),
             "result": "passed" if result.returncode == 0 else "failed",
             "exit_code": result.returncode,
@@ -139,11 +136,23 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
             f"hostile-agent attack coverage mismatch; missing={missing}, unexpected={unexpected}"
         )
 
+    expected_nodeids = {str(item["path"]) for item in TESTS}
+    recorded_nodeids = {str(item.get("test_nodeid")) for item in evidence}
+    if recorded_nodeids != expected_nodeids:
+        raise ValueError(
+            f"hostile-agent proof nodeid mismatch; missing={sorted(expected_nodeids - recorded_nodeids)}, "
+            f"unexpected={sorted(recorded_nodeids - expected_nodeids)}"
+        )
+
     for matrix_item in ATTACK_MATRIX:
         test = evidence_by_path.get(matrix_item["test_path"])
         if test is None:
             raise ValueError(
                 f"attack {matrix_item['attack']!r} has no recorded test evidence"
+            )
+        if test.get("test_nodeid") != matrix_item["test_path"]:
+            raise ValueError(
+                f"attack {matrix_item['attack']!r} is not bound to its executed pytest nodeid"
             )
         if matrix_item["attack"] not in test.get("attacks_covered", []):
             raise ValueError(
@@ -210,7 +219,7 @@ def main() -> int:
     evidence: list[dict[str, object]] = []
     failures = 0
     for test in TESTS:
-        failures += _run(test["name"], test["path"], evidence)
+        failures += _run(test, evidence)
 
     print("\n=== ATTACK MATRIX ===")
     for item in ATTACK_MATRIX:
