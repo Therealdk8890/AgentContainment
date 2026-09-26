@@ -18,6 +18,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -94,26 +95,54 @@ ATTACK_MATRIX = (
 )
 
 
-def _run(test: dict[str, object], evidence: list[dict[str, object]]) -> int:
+def _read_proof_file(path: str) -> set[str]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(payload, list) or not all(isinstance(item, str) for item in payload):
+        return set()
+    return set(payload)
+
+
+def _run(
+    test: dict[str, object],
+    evidence: list[dict[str, object]],
+    proof_file: str,
+) -> int:
     label = str(test["name"])
     path = str(test["path"])
+    expected_proofs = set(test["proof_ids"])
+    before_proofs = _read_proof_file(proof_file)
     print(f"\n=== {label.upper()} ===")
     print(f"pytest -q -rs {path}")
     started = time.monotonic()
+    env = os.environ.copy()
+    env["AGENT_CONTAINMENT_PROOF_FILE"] = proof_file
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-rs", "-s", path],
+        [sys.executable, "-m", "pytest", "-q", "-rs", path],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
-    output = result.stdout + result.stderr
-    proof_ids = [proof_id for proof_id in test["proof_ids"] if f"AC_PROOF:{proof_id}" in output]
-    missing_proofs = [proof_id for proof_id in test["proof_ids"] if proof_id not in proof_ids]
+    after_proofs = _read_proof_file(proof_file)
+    new_proofs = after_proofs - before_proofs
+    proof_ids = sorted(new_proofs & expected_proofs)
+    unexpected_proofs = sorted(new_proofs - expected_proofs)
+    missing_proofs = sorted(expected_proofs - new_proofs)
     duration = time.monotonic() - started
-    status = "PASS" if result.returncode == 0 and not missing_proofs else "FAIL"
+    status = (
+        "PASS"
+        if result.returncode == 0 and not missing_proofs and not unexpected_proofs
+        else "FAIL"
+    )
     if missing_proofs:
-        print(f"[FAIL] {label}: missing proof markers {missing_proofs}")
-    else:
+        print(f"[FAIL] {label}: missing structured proof IDs {missing_proofs}")
+    if unexpected_proofs:
+        print(f"[FAIL] {label}: unexpected structured proof IDs {unexpected_proofs}")
+    if not missing_proofs and not unexpected_proofs:
         print(f"[{status}] {label}")
     evidence.append(
         {
@@ -122,7 +151,9 @@ def _run(test: dict[str, object], evidence: list[dict[str, object]]) -> int:
             "test_nodeid": path,
             "attacks_covered": list(test["attacks"]),
             "proof_ids": proof_ids,
-            "result": "passed" if result.returncode == 0 and not missing_proofs else "failed",
+            "result": "passed"
+            if result.returncode == 0 and not missing_proofs and not unexpected_proofs
+            else "failed",
             "exit_code": result.returncode,
             "duration_seconds": round(duration, 6),
         }
@@ -197,7 +228,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
         )
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_type": "hostile_agent_demo",
         "result": derived_result,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -212,7 +243,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
         },
         "tests": evidence,
         "attack_matrix": list(ATTACK_MATRIX),
-        "proof_markers": sorted(recorded_proofs),
+        "proof_ids": sorted(recorded_proofs),
         "claims": {
             "scope": "test evidence from temporary resources on the tested Linux host",
             "universal_security_guarantee": False,
@@ -245,8 +276,21 @@ def main() -> int:
 
     evidence: list[dict[str, object]] = []
     failures = 0
-    for test in TESTS:
-        failures += _run(test, evidence)
+    with tempfile.NamedTemporaryFile(
+        prefix="agent-containment-proof-",
+        suffix=".json",
+        delete=False,
+    ) as proof_handle:
+        proof_file = proof_handle.name
+    os.unlink(proof_file)
+    try:
+        for test in TESTS:
+            failures += _run(test, evidence, proof_file)
+    finally:
+        try:
+            os.unlink(proof_file)
+        except FileNotFoundError:
+            pass
 
     print("\n=== ATTACK MATRIX ===")
     for item in ATTACK_MATRIX:
