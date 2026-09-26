@@ -121,7 +121,7 @@ class LinuxEbpfExternalEnforcer:
     def verify_contained(self, agent_id: str) -> EnforcementResult:
         try:
             result = subprocess.run(
-                [str(self._controller), "verify", str(self._pin_dir)],
+                [str(self._controller), "verify", str(self._pin_dir), str(self._kernel.cgroup_path)],
                 check=False,
                 timeout=self._timeout,
                 capture_output=True,
