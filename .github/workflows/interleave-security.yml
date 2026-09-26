@@ -1,0 +1,22 @@
+name: interleave-security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-interleaving:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . pytest git+https://github.com/Therealdk8890/interleave-test.git
+      - run: python -m pytest -q tests/test_interleave_scheduler_security_model.py
