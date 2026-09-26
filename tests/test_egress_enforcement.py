@@ -160,3 +160,76 @@ def test_linux_ebpf_external_release_requires_current_controller_proof(tmp_path:
 
     assert result.status.name == "VERIFICATION_FAILED"
     assert "current controller instance" in result.detail
+
+
+
+def test_linux_ebpf_external_contain_reconciles_existing_pin(monkeypatch, tmp_path: Path):
+    cgroup = tmp_path / "agent"
+    cgroup.mkdir()
+    controller = tmp_path / "ctl"
+    controller.write_text("")
+    obj = tmp_path / "policy.o"
+    obj.write_text("")
+    pin_dir = tmp_path / "pin"
+    pin_dir.mkdir()
+    (pin_dir / "egress_link").write_text("pinned")
+
+    calls = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return Result()
+
+    monkeypatch.setattr("agent_containment.egress_enforcement.subprocess.run", fake_run)
+
+    enforcer = __import__(
+        "agent_containment.egress_enforcement",
+        fromlist=["LinuxEbpfExternalEnforcer"],
+    ).LinuxEbpfExternalEnforcer(controller, obj, cgroup, pin_dir)
+
+    result = enforcer.contain("agent-1")
+
+    assert result.status.name == "ENFORCED"
+    assert calls[0][0] == [str(controller), "verify", str(pin_dir), str(cgroup)]
+
+
+def test_linux_ebpf_external_contain_does_not_replace_unverifiable_pin(monkeypatch, tmp_path: Path):
+    cgroup = tmp_path / "agent"
+    cgroup.mkdir()
+    controller = tmp_path / "ctl"
+    controller.write_text("")
+    obj = tmp_path / "policy.o"
+    obj.write_text("")
+    pin_dir = tmp_path / "pin"
+    pin_dir.mkdir()
+    pinned = pin_dir / "egress_link"
+    pinned.write_text("pinned")
+
+    calls = []
+
+    class Result:
+        returncode = 1
+        stderr = "wrong target"
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return Result()
+
+    monkeypatch.setattr("agent_containment.egress_enforcement.subprocess.run", fake_run)
+
+    enforcer = __import__(
+        "agent_containment.egress_enforcement",
+        fromlist=["LinuxEbpfExternalEnforcer"],
+    ).LinuxEbpfExternalEnforcer(controller, obj, cgroup, pin_dir)
+
+    result = enforcer.contain("agent-1")
+
+    assert result.status.name == "DEGRADED"
+    assert calls[0][0] == [str(controller), "verify", str(pin_dir), str(cgroup)]
+    assert pinned.exists()
