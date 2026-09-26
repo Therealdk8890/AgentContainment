@@ -42,7 +42,7 @@ def _complete_evidence(result="passed", exit_code=0):
     return [
         {
             "name": "controller isolation",
-            "test_path": "tests/integration/test_controller_isolation.py",
+            "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
             "attacks_covered": [
                 "controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"
             ],
@@ -50,14 +50,14 @@ def _complete_evidence(result="passed", exit_code=0):
         },
         {
             "name": "cgroup delegation boundary",
-            "test_path": "tests/integration/test_cgroup_delegation.py",
+            "test_path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
             "attacks_covered": ["cross_boundary_cgroup_migrate"],
             "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
         },
         {
             "name": "kernel egress + process containment",
-            "test_path": "tests/integration/test_linux_ebpf.py",
-            "attacks_covered": ["cgroup_workload_containment", "post_containment_egress"],
+            "test_path": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
+            "attacks_covered": ["cgroup_workload_containment"],
             "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
         },
         {
@@ -74,7 +74,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     evidence = [
         {
             "name": "controller isolation",
-            "test_path": "tests/integration/test_controller_isolation.py",
+            "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
             "attacks_covered": [
                 "controller_signal",
                 "controller_ptrace_memory",
@@ -86,7 +86,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
         },
         {
             "name": "cgroup delegation boundary",
-            "test_path": "tests/integration/test_cgroup_delegation.py",
+            "test_path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
             "attacks_covered": ["cross_boundary_cgroup_migrate"],
             "result": "passed",
             "exit_code": 0,
@@ -133,7 +133,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     assert payload["claims"]["universal_security_guarantee"] is False
     assert payload["claims"]["host_cryptographic_attestation"] is False
 
-    assert len(payload["tests"]) == 4
+    assert len(payload["tests"]) == 5
     assert all(item["result"] == "passed" for item in payload["tests"])
 
 
@@ -142,7 +142,7 @@ def test_hostile_agent_evidence_rejects_incomplete_attack_coverage(tmp_path, mon
     evidence = [
         {
             "name": "controller isolation",
-            "test_path": "tests/integration/test_controller_isolation.py",
+            "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
             "attacks_covered": ["controller_signal"],
             "result": "passed",
             "exit_code": 0,
