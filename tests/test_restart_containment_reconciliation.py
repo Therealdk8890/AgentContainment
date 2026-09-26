@@ -53,9 +53,11 @@ def test_restart_reconciles_external_containment_before_recovery(monkeypatch, tm
         tmp_path / "ctl", tmp_path / "policy.o", tmp_path / "agent", pin_dir
     )
     second = ContainmentService(incidents=IncidentRegistry(incident_path))
+    restarted_runtime = Runtime("agent-restart-proof")
+    restarted_runtime.restore_contained(1)
     runtime = second.register(
         "agent-restart-proof",
-        containment=ContainmentController(Runtime("agent-restart-proof"), enforcers=[second_enforcer]),
+        containment=ContainmentController(restarted_runtime, enforcers=[second_enforcer]),
     )
 
     assert runtime.state is RuntimeState.CONTAINED
@@ -86,6 +88,13 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
         stderr = ""
         stdout = ""
 
+    first = ContainmentService(incidents=IncidentRegistry(incident_path))
+    first.register(
+        "agent-restart-block",
+        containment=ContainmentController(Runtime("agent-restart-block"), enforcers=[first_enforcer]),
+    )
+    assert first.contain("agent-restart-block").complete
+
     def fake_run(cmd, **kwargs):
         if cmd[1] == "verify" and str(second_enforcer._pin_dir) in cmd:
             return type("Result", (), {
@@ -98,13 +107,6 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
     monkeypatch.setattr(
         "agent_containment.egress_enforcement.subprocess.run", fake_run
     )
-
-    first = ContainmentService(incidents=IncidentRegistry(incident_path))
-    first.register(
-        "agent-restart-block",
-        containment=ContainmentController(Runtime("agent-restart-block"), enforcers=[first_enforcer]),
-    )
-    assert first.contain("agent-restart-block").complete
 
     second = ContainmentService(incidents=IncidentRegistry(incident_path))
     runtime = second.register(
