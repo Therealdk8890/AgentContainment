@@ -143,7 +143,7 @@ class LinuxEbpfExternalEnforcer:
     def release(self, agent_id: str) -> EnforcementResult:
         try:
             result = subprocess.run(
-                [str(self._controller), "detach", str(self._pin_dir)],
+                [str(self._controller), "detach", str(self._pin_dir), str(self._kernel.cgroup_path)],
                 check=False,
                 timeout=self._timeout,
                 capture_output=True,
