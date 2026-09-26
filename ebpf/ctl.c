@@ -139,7 +139,7 @@ static int verify_program(const char *pin_dir, const char *cgroup_path)
 
     int found = 0;
     for (__u32 i = 0; i < prog_cnt; ++i) {
-        if (prog_ids[i] == info.cgroup.prog_id) {
+        if (prog_ids[i] == info.prog_id) {
             found = 1;
             break;
         }
