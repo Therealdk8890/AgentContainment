@@ -1,3 +1,4 @@
+from agent_containment.proof import record_proof
 from agent_containment.runtime import Runtime, RuntimeState
 
 
@@ -41,7 +42,7 @@ def test_stale_execution_lease_cannot_cross_containment_or_recovery():
     assert runtime.lease_valid(fresh_lease)
     assert runtime.execute_if_active(fresh_lease, lambda: executed.append("fresh")) is None
     assert executed == ["before", "fresh"]
-    print("AC_PROOF:stale_execution_lease")
+    record_proof("stale_execution_lease")
 
 
 def test_stale_lease_cannot_execute_during_containment_transition():
