@@ -8,6 +8,7 @@ from agent_containment.runtime import Runtime, RuntimeState
 
 
 def _ebpf_controller(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     cgroup = tmp_path / "agent"
     cgroup.mkdir()
     controller = tmp_path / "ctl"
@@ -48,7 +49,9 @@ def test_restart_reconciles_external_containment_before_recovery(monkeypatch, tm
     assert report.external_verified
     assert pin_dir.joinpath("egress_link").exists()
 
-    second_enforcer, _ = _ebpf_controller(tmp_path / "second")
+    second_enforcer = LinuxEbpfExternalEnforcer(
+        tmp_path / "ctl", tmp_path / "policy.o", tmp_path / "agent", pin_dir
+    )
     second = ContainmentService(incidents=IncidentRegistry(incident_path))
     runtime = second.register(
         "agent-restart-proof",
@@ -72,8 +75,11 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
     monkeypatch, tmp_path
 ):
     incident_path = tmp_path / "incidents.json"
-    first_enforcer, _ = _ebpf_controller(tmp_path / "first")
-    second_enforcer, _ = _ebpf_controller(tmp_path / "second")
+    first_enforcer, pin_dir = _ebpf_controller(tmp_path / "shared")
+    second_enforcer = LinuxEbpfExternalEnforcer(
+        tmp_path / "shared" / "ctl", tmp_path / "shared" / "policy.o",
+        tmp_path / "shared" / "agent", pin_dir
+    )
 
     class Result:
         returncode = 0
