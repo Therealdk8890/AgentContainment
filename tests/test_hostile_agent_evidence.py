@@ -39,82 +39,29 @@ EXPECTED_ATTACKS = {
 
 
 def _complete_evidence(result="passed", exit_code=0):
+    tests = [
+        ("controller isolation", "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller", ["controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"]),
+        ("cgroup delegation boundary", "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree", ["cross_boundary_cgroup_migrate"]),
+        ("process containment", "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process", ["cgroup_workload_containment"]),
+        ("kernel egress containment", "tests/integration/test_linux_ebpf.py::test_linux_ebpf_blocks_subprocess_egress_after_containment", ["post_containment_egress"]),
+        ("stale execution lease fencing", "tests/test_epoch_fencing_adversarial.py::test_stale_execution_lease_cannot_cross_containment_or_recovery", ["stale_execution_lease"]),
+    ]
     return [
         {
-            "name": "controller isolation",
-            "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
-            "test_nodeid": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
-            "attacks_covered": [
-                "controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"
-            ],
-            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
-        },
-        {
-            "name": "cgroup delegation boundary",
-            "test_path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
-            "test_nodeid": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
-            "attacks_covered": ["cross_boundary_cgroup_migrate"],
-            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
-        },
-        {
-            "name": "kernel egress + process containment",
-            "test_path": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
-            "test_nodeid": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
-            "attacks_covered": ["cgroup_workload_containment"],
-            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
-        },
-        {
-            "name": "stale execution lease fencing",
-            "test_path": "tests/test_epoch_fencing_adversarial.py",
-            "attacks_covered": ["stale_execution_lease"],
-            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
-        },
+            "name": name,
+            "test_path": nodeid,
+            "test_nodeid": nodeid,
+            "attacks_covered": attacks,
+            "result": result,
+            "exit_code": exit_code,
+            "duration_seconds": 0.1,
+        }
+        for name, nodeid, attacks in tests
     ]
-
 
 def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    evidence = [
-        {
-            "name": "controller isolation",
-            "test_path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
-            "attacks_covered": [
-                "controller_signal",
-                "controller_ptrace_memory",
-                "controller_ipc_tamper",
-            ],
-            "result": "passed",
-            "exit_code": 0,
-            "duration_seconds": 0.1,
-        },
-        {
-            "name": "cgroup delegation boundary",
-            "test_path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
-            "attacks_covered": ["cross_boundary_cgroup_migrate"],
-            "result": "passed",
-            "exit_code": 0,
-            "duration_seconds": 0.1,
-        },
-        {
-            "name": "kernel egress + process containment",
-            "test_path": "tests/integration/test_linux_ebpf.py",
-            "attacks_covered": [
-                "cgroup_workload_containment",
-                "post_containment_egress",
-            ],
-            "result": "passed",
-            "exit_code": 0,
-            "duration_seconds": 0.1,
-        },
-        {
-            "name": "stale execution lease fencing",
-            "test_path": "tests/test_epoch_fencing_adversarial.py",
-            "attacks_covered": ["stale_execution_lease"],
-            "result": "passed",
-            "exit_code": 0,
-            "duration_seconds": 0.1,
-        },
-    ]
+    evidence = _complete_evidence()
 
     _write_evidence(evidence, "contained")
 
@@ -124,21 +71,19 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     assert payload["evidence_type"] == "hostile_agent_demo"
     assert payload["result"] == "contained"
 
-    attacks = {
-        item["attack"]: item["expected"] for item in payload["attack_matrix"]
-    }
+    attacks = {item["attack"]: item["expected"] for item in payload["attack_matrix"]}
     assert attacks == EXPECTED_ATTACKS
 
     test_paths = {item["test_path"] for item in payload["tests"]}
+    nodeids = {item["test_nodeid"] for item in payload["tests"]}
+    assert nodeids == test_paths
     for item in payload["attack_matrix"]:
         assert item["test_path"] in test_paths
 
     assert payload["claims"]["universal_security_guarantee"] is False
     assert payload["claims"]["host_cryptographic_attestation"] is False
-
     assert len(payload["tests"]) == 5
     assert all(item["result"] == "passed" for item in payload["tests"])
-
 
 def test_hostile_agent_evidence_rejects_incomplete_attack_coverage(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
