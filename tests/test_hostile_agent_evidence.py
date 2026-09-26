@@ -38,6 +38,37 @@ EXPECTED_ATTACKS = {
 }
 
 
+def _complete_evidence(result="passed", exit_code=0):
+    return [
+        {
+            "name": "controller isolation",
+            "test_path": "tests/integration/test_controller_isolation.py",
+            "attacks_covered": [
+                "controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"
+            ],
+            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
+        },
+        {
+            "name": "cgroup delegation boundary",
+            "test_path": "tests/integration/test_cgroup_delegation.py",
+            "attacks_covered": ["cross_boundary_cgroup_migrate"],
+            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
+        },
+        {
+            "name": "kernel egress + process containment",
+            "test_path": "tests/integration/test_linux_ebpf.py",
+            "attacks_covered": ["cgroup_workload_containment", "post_containment_egress"],
+            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
+        },
+        {
+            "name": "stale execution lease fencing",
+            "test_path": "tests/test_epoch_fencing_adversarial.py",
+            "attacks_covered": ["stale_execution_lease"],
+            "result": result, "exit_code": exit_code, "duration_seconds": 0.1,
+        },
+    ]
+
+
 def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     evidence = [
@@ -130,18 +161,7 @@ def test_hostile_agent_evidence_rejects_inconsistent_contained_result(tmp_path, 
     monkeypatch.chdir(tmp_path)
 
     try:
-        _write_evidence(
-            [
-                {
-                    "name": "controller isolation",
-                    "test_path": "tests/integration/test_controller_isolation.py",
-                    "result": "failed",
-                    "exit_code": 1,
-                    "duration_seconds": 0.2,
-                }
-            ],
-            "contained",
-        )
+        _write_evidence(_complete_evidence("failed", 1), "contained")
     except ValueError as exc:
         assert "inconsistent" in str(exc)
     else:
@@ -164,18 +184,7 @@ def test_hostile_agent_evidence_rejects_empty_evidence(tmp_path, monkeypatch):
 def test_hostile_agent_evidence_records_failures(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    _write_evidence(
-        [
-            {
-                "name": "controller isolation",
-                "test_path": "tests/integration/test_controller_isolation.py",
-                "result": "failed",
-                "exit_code": 1,
-                "duration_seconds": 0.2,
-            }
-        ],
-        "failed",
-    )
+    _write_evidence(_complete_evidence("failed", 1), "failed")
 
     payload = json.loads((tmp_path / "hostile-agent-evidence.json").read_text())
     assert payload["result"] == "failed"
