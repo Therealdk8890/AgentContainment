@@ -8,6 +8,32 @@
 
 > **Status: Early research/prototype — not production ready.**
 
+## Proof before platform
+
+AgentContainment is easiest to evaluate from the bottom up:
+
+1. **Observed** — the controller records what it saw and what state transition it requested.
+2. **Verified** — an enforcement mechanism is independently checked rather than treated as successful because an API call returned.
+3. **Authenticated receipt** — the recorded receipt can authenticate/tamper-check its payload to a verifier holding the shared secret.
+4. **Not implied** — none of those states means the underlying claim is automatically true.
+
+> **Verified ≠ claim is true.**
+
+In particular, a valid v0.1 HMAC receipt authenticates the recorded payload to a holder of the verification secret. It does **not** prove that every underlying kernel, provider, or external-world claim was true. See docs/SECURITY_CONTRACT.md for the trust model.
+
+### Reproduce the host-boundary proof
+
+On an isolated Linux host with the required privileges:
+
+~~~
+bash scripts/build_ebpf.sh
+AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 python demo/hostile_agent_demo.py
+~~~
+
+The hostile-agent runner exercises real cgroup/eBPF resources and fails non-zero if a selected adversarial proof fails. A successful run is evidence for the tested Linux host and kernel configuration — **not** a universal security guarantee.
+
+That distinction is the product's central contract: **show the boundary, show the evidence, and state exactly what the evidence does not prove.**
+
 AgentContainment is a controller-side security layer for AI agents. It is designed for the moment when an agent can no longer be trusted to enforce its own boundaries.
 
 The core idea is simple:
@@ -120,38 +146,35 @@ No single mechanism is treated as sufficient:
 6. **Kernel egress enforcement** — the Linux eBPF integration can block outbound packets.
 7. **Tamper-evident evidence** — controller-owned audit events are linked in a hash chain.
 
-## What is actually enforced?
+## Implemented and provable today
 
-AgentContainment uses a provider-neutral enforcement contract.
+AgentContainment's current release should be evaluated on the controls that exist and have evidence behind them:
 
-~~~
-                 REQUEST CONTAINMENT
-                          │
-                          ▼
-                     ENFORCE
-                          │
-                          ▼
-                     VERIFY
-                          │
-                          ▼
-                 CERTIFY CONTAINED
-~~~
-
-A provider is not considered successful merely because a command or API request was accepted. Providers report explicit states such as:
-
-- ENFORCED
-- VERIFICATION_FAILED
-- DEGRADED
-- NOT_CONFIGURED
-
-Current and planned enforcement targets include:
-
-| Provider | Boundary | Role |
+| Capability | Current status | What can be checked |
 |---|---|---|
-| **cgroup v2** | Process / workload | Linux process containment |
-| **eBPF** | Network egress | Kernel-level egress enforcement |
-| **Cilium** | Kubernetes network | Optional network enforcement integration |
-| **Tetragon** | Runtime / kernel | Optional runtime enforcement integration |
+| Controller-owned authorization and policy history | **Implemented** | Unit/security tests and controller architecture |
+| Epoch fencing and stale-lease invalidation | **Implemented + adversarially tested** | Privileged validation rejects authority from expired epochs |
+| cgroup v2 workload containment | **Implemented + host-tested** | cgroup.kill termination and cgroup state verification |
+| Linux eBPF cgroup egress boundary | **Implemented + host-tested** | Raw socket egress is blocked after containment on the tested host/kernel |
+| Controller/agent Unix-socket boundary | **Implemented + tested** | Peer credentials and narrow control protocol |
+| Tamper-evident controller evidence | **Implemented** | Hash-chain verification detects edits, deletion, and reordering |
+| Authenticated proof receipts | **Implemented in v0.1** | HMAC-SHA-256 receipt integrity/authentication can be independently checked with the shared secret |
+| Recovery evidence / fail-closed compensation | **Implemented in v0.1** | Recovery lifecycle records success, failure, recontainment, and degraded states |
+| Hostile-agent regression runner | **Implemented** | Reproducible adversarial demonstration exits non-zero on failed selected proofs |
+
+A provider is not considered successful merely because a command or API request was accepted. Enforcement providers report explicit states such as **ENFORCED**, **VERIFICATION_FAILED**, **DEGRADED**, and **NOT_CONFIGURED**.
+
+### Not yet / roadmap
+
+These are product-direction items, not claims that the current release provides a complete enterprise control plane:
+
+- centralized fleet management;
+- enterprise RBAC integrations;
+- SIEM/SOC integrations;
+- broader Kubernetes/Cilium/Tetragon integrations;
+- deployment automation and fleet-wide operational tooling;
+- stronger external evidence anchoring;
+- broader provider coverage and multi-environment hardening.
 
 Cilium and Tetragon are **optional integration targets**, not dependencies of the core package.
 
@@ -388,6 +411,22 @@ Before production use, validate at minimum:
 
 AgentContainment does **not** claim that completed external side effects can be undone.
 
+## Project maturity and continuity
+
+AgentContainment is a **0.1.0 research/prototype release maintained by a solo project owner**. That matters for anyone evaluating it as security infrastructure.
+
+There is currently no claim of:
+
+- an enterprise support organization;
+- a guaranteed SLA;
+- a multi-maintainer succession plan;
+- managed fleet availability;
+- vendor-operated incident response.
+
+The practical mitigation is to treat the repository as inspectable infrastructure rather than a hosted trust service: pin the version or commit you deploy, run the privileged validation against your own kernel/runtime configuration, retain your own evidence, and maintain an internal fork or mirror if operational continuity is required.
+
+The Apache-2.0 license permits organizations to fork and continue the codebase. The project should earn production trust through reproducible evidence, review, and operational ownership — not through an assumption that the maintainer will always be available.
+
 ## Tests
 
 The repository contains:
@@ -455,11 +494,12 @@ See docs/SECURITY_CONTRACT.md for the current recovery evidence contract and tru
 
 ## Roadmap
 
-The project is intentionally evolving toward a broader provider-neutral agent security control plane.
+The project is intentionally evolving toward a broader provider-neutral agent security control plane. Roadmap work is explicitly separated from the controls listed as implemented above.
 
 Near-term areas include:
 
 - deeper enforcement-provider integrations;
+- centralized fleet and operational controls;
 - broader incident-to-regression workflows;
 - stronger external evidence anchoring;
 - deployment hardening and operational guidance;
