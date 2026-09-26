@@ -104,7 +104,6 @@ static int detach_program(const char *pin_dir, const char *cgroup_path)
 
     int link_fd = bpf_obj_get(link_path);
     if (link_fd < 0) {
-        if (errno == ENOENT) return 0;
         fprintf(stderr, "open pinned egress link failed: %s\n", strerror(errno));
         return -1;
     }

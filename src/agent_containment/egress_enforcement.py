@@ -108,8 +108,10 @@ class LinuxEbpfExternalEnforcer:
         self._controller = Path(controller_path)
         self._pin_dir = Path(pin_dir)
         self._timeout = timeout
+        self._release_verified = False
 
     def contain(self, agent_id: str) -> EnforcementResult:
+        self._release_verified = False
         try:
             self._kernel.contain()
             return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
@@ -157,10 +159,17 @@ class LinuxEbpfExternalEnforcer:
                 self.name, EnforcementStatus.DEGRADED,
                 detail or "eBPF detach failed",
             )
+        self._release_verified = True
         return EnforcementResult(self.name, EnforcementStatus.RELEASED)
 
     def verify_released(self, agent_id: str) -> EnforcementResult:
         link = self._pin_dir / "egress_link"
+        if not self._release_verified:
+            return EnforcementResult(
+                self.name,
+                EnforcementStatus.VERIFICATION_FAILED,
+                "release has not been verified by the current controller instance",
+            )
         if link.exists():
             return EnforcementResult(
                 self.name,

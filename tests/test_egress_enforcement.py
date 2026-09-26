@@ -140,3 +140,23 @@ def test_linux_ebpf_external_release_binds_to_cgroup(monkeypatch, tmp_path: Path
         str(pin_dir),
         str(cgroup),
     ]
+
+
+def test_linux_ebpf_external_release_requires_current_controller_proof(tmp_path: Path):
+    cgroup = tmp_path / "agent"
+    cgroup.mkdir()
+    controller = tmp_path / "ctl"
+    controller.write_text("")
+    obj = tmp_path / "policy.o"
+    obj.write_text("")
+    pin_dir = tmp_path / "pin"
+
+    enforcer = __import__(
+        "agent_containment.egress_enforcement",
+        fromlist=["LinuxEbpfExternalEnforcer"],
+    ).LinuxEbpfExternalEnforcer(controller, obj, cgroup, pin_dir)
+
+    result = enforcer.verify_released("agent-1")
+
+    assert result.status.name == "VERIFICATION_FAILED"
+    assert "current controller instance" in result.detail
