@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -97,6 +98,13 @@ class CgroupV2Enforcer:
             identity_failure = self._verify_identity(agent_id, path)
             if identity_failure:
                 return identity_failure
+            # cgroup.kill is asynchronous. Allow the kernel a short bounded
+            # window to reap the killed workload before declaring verification
+            # failure. We still require an observed empty cgroup; this is not
+            # a sleep-based assertion of success.
+            deadline = time.monotonic() + 2.0
+            while LinuxCgroupSupervisor.is_populated(path) and time.monotonic() < deadline:
+                time.sleep(0.01)
             if LinuxCgroupSupervisor.is_populated(path):
                 return EnforcementResult(
                     self.name,
