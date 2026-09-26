@@ -27,26 +27,31 @@ TESTS = [
         "name": "controller isolation",
         "path": "tests/integration/test_controller_isolation.py::test_unprivileged_agent_cannot_interfere_with_controller",
         "attacks": ("controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"),
+        "proof_ids": ("controller_signal", "controller_ptrace_memory", "controller_ipc_tamper"),
     },
     {
         "name": "cgroup delegation boundary",
         "path": "tests/integration/test_cgroup_delegation.py::test_non_root_process_uses_delegated_cgroup_subtree",
         "attacks": ("cross_boundary_cgroup_migrate",),
+        "proof_ids": ("cross_boundary_cgroup_migrate",),
     },
     {
         "name": "process containment",
         "path": "tests/integration/test_linux_ebpf.py::test_controller_containment_kills_hostile_cgroup_process",
         "attacks": ("cgroup_workload_containment",),
+        "proof_ids": ("cgroup_workload_containment",),
     },
     {
         "name": "kernel egress containment",
         "path": "tests/integration/test_linux_ebpf.py::test_linux_ebpf_blocks_subprocess_egress_after_containment",
         "attacks": ("post_containment_egress",),
+        "proof_ids": ("post_containment_egress",),
     },
     {
         "name": "stale execution lease fencing",
         "path": "tests/test_epoch_fencing_adversarial.py::test_stale_execution_lease_cannot_cross_containment_or_recovery",
         "attacks": ("stale_execution_lease",),
+        "proof_ids": ("stale_execution_lease",),
     },
 ]
 
@@ -96,19 +101,28 @@ def _run(test: dict[str, object], evidence: list[dict[str, object]]) -> int:
     print(f"pytest -q -rs {path}")
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-rs", path],
+        [sys.executable, "-m", "pytest", "-q", "-rs", "-s", path],
+        capture_output=True,
+        text=True,
         check=False,
     )
+    output = result.stdout + result.stderr
+    proof_ids = [proof_id for proof_id in test["proof_ids"] if f"AC_PROOF:{proof_id}" in output]
+    missing_proofs = [proof_id for proof_id in test["proof_ids"] if proof_id not in proof_ids]
     duration = time.monotonic() - started
-    status = "PASS" if result.returncode == 0 else "FAIL"
-    print(f"[{status}] {label}")
+    status = "PASS" if result.returncode == 0 and not missing_proofs else "FAIL"
+    if missing_proofs:
+        print(f"[FAIL] {label}: missing proof markers {missing_proofs}")
+    else:
+        print(f"[{status}] {label}")
     evidence.append(
         {
             "name": label,
             "test_path": path,
             "test_nodeid": path,
             "attacks_covered": list(test["attacks"]),
-            "result": "passed" if result.returncode == 0 else "failed",
+            "proof_ids": proof_ids,
+            "result": "passed" if result.returncode == 0 and not missing_proofs else "failed",
             "exit_code": result.returncode,
             "duration_seconds": round(duration, 6),
         }
@@ -159,6 +173,18 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
                 f"attack {matrix_item['attack']!r} is not covered by "
                 f"{matrix_item['test_path']!r}"
             )
+        if matrix_item["attack"] not in test.get("proof_ids", []):
+            raise ValueError(
+                f"attack {matrix_item['attack']!r} has no executed proof marker"
+            )
+
+    expected_proofs = {proof_id for item in TESTS for proof_id in item["proof_ids"]}
+    recorded_proofs = {proof_id for item in evidence for proof_id in item.get("proof_ids", [])}
+    if recorded_proofs != expected_proofs:
+        raise ValueError(
+            f"hostile-agent proof marker mismatch; missing={sorted(expected_proofs - recorded_proofs)}, "
+            f"unexpected={sorted(recorded_proofs - expected_proofs)}"
+        )
 
     derived_result = "contained" if all(
         item.get("result") == "passed" and item.get("exit_code") == 0
@@ -186,6 +212,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
         },
         "tests": evidence,
         "attack_matrix": list(ATTACK_MATRIX),
+        "proof_markers": sorted(recorded_proofs),
         "claims": {
             "scope": "test evidence from temporary resources on the tested Linux host",
             "universal_security_guarantee": False,
