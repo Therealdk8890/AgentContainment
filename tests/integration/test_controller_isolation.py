@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_containment.proof import record_proof
+
 
 pytestmark = pytest.mark.integration
 
@@ -205,9 +207,9 @@ if results != {
         stdout, stderr = agent.communicate(timeout=5)
         assert agent.returncode == 0, stderr + stdout
 
-        print("AC_PROOF:controller_signal")
-        print("AC_PROOF:controller_ptrace_memory")
-        print("AC_PROOF:controller_ipc_tamper")
+        record_proof("controller_signal")
+        record_proof("controller_ptrace_memory")
+        record_proof("controller_ipc_tamper")
 
         assert daemon.poll() is None
 
