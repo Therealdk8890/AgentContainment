@@ -49,7 +49,10 @@ static int attach_program(const char *obj_path, const char *cgroup_path, const c
 
     if (ensure_dir(pin_dir) < 0) return -1;
     snprintf(link_path, sizeof(link_path), "%s/egress_link", pin_dir);
-    unlink(link_path);
+    if (access(link_path, F_OK) == 0) {
+        fprintf(stderr, "pinned egress link already exists; reconcile it before attaching a new link\n");
+        return -1;
+    }
 
     cgroup_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (cgroup_fd < 0) {
