@@ -25,7 +25,7 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "tests",
     "attack_matrix",
     "claims",
-    "proof_markers",
+    "proof_ids",
 }
 
 EXPECTED_ATTACKS = {
@@ -69,13 +69,13 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
 
     payload = json.loads((tmp_path / "hostile-agent-evidence.json").read_text())
     assert set(payload) == REQUIRED_TOP_LEVEL_KEYS
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["evidence_type"] == "hostile_agent_demo"
     assert payload["result"] == "contained"
 
     attacks = {item["attack"]: item["expected"] for item in payload["attack_matrix"]}
     assert attacks == EXPECTED_ATTACKS
-    assert payload["proof_markers"] == sorted(EXPECTED_ATTACKS)
+    assert payload["proof_ids"] == sorted(EXPECTED_ATTACKS)
 
     test_paths = {item["test_path"] for item in payload["tests"]}
     nodeids = {item["test_nodeid"] for item in payload["tests"]}
