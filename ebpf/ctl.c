@@ -11,7 +11,7 @@
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir> | verify <pin-dir>\n", prog);
+    fprintf(stderr, "usage: %s attach <object> <cgroup> <pin-dir> | detach <pin-dir> | verify <pin-dir> <cgroup>\n", prog);
 }
 
 static int ensure_dir(const char *path)
@@ -118,8 +118,8 @@ int main(int argc, char **argv)
         return detach_program(argv[2]) == 0 ? 0 : 1;
     }
     if (strcmp(argv[1], "verify") == 0) {
-        if (argc != 3) { usage(argv[0]); return 2; }
-        return verify_program(argv[2]) == 0 ? 0 : 1;
+        if (argc != 4) { usage(argv[0]); return 2; }
+        return verify_program(argv[2], argv[3]) == 0 ? 0 : 1;
     }
     usage(argv[0]);
     return 2;
