@@ -184,6 +184,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         assert containment_events
         assert containment_events[-1]["external_verified"] is True
         assert containment_events[-1]["complete"] is True
+        print("AC_PROOF:post_containment_egress")
     finally:
         if child is not None and child.poll() is None:
             child.kill()
