@@ -44,6 +44,11 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
         {
             "name": "controller isolation",
             "test_path": "tests/integration/test_controller_isolation.py",
+            "attacks_covered": [
+                "controller_signal",
+                "controller_ptrace_memory",
+                "controller_ipc_tamper",
+            ],
             "result": "passed",
             "exit_code": 0,
             "duration_seconds": 0.1,
@@ -51,6 +56,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
         {
             "name": "cgroup delegation boundary",
             "test_path": "tests/integration/test_cgroup_delegation.py",
+            "attacks_covered": ["cross_boundary_cgroup_migrate"],
             "result": "passed",
             "exit_code": 0,
             "duration_seconds": 0.1,
@@ -58,6 +64,10 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
         {
             "name": "kernel egress + process containment",
             "test_path": "tests/integration/test_linux_ebpf.py",
+            "attacks_covered": [
+                "cgroup_workload_containment",
+                "post_containment_egress",
+            ],
             "result": "passed",
             "exit_code": 0,
             "duration_seconds": 0.1,
@@ -65,6 +75,7 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
         {
             "name": "stale execution lease fencing",
             "test_path": "tests/test_epoch_fencing_adversarial.py",
+            "attacks_covered": ["stale_execution_lease"],
             "result": "passed",
             "exit_code": 0,
             "duration_seconds": 0.1,
@@ -94,6 +105,26 @@ def test_hostile_agent_evidence_schema_is_stable(tmp_path, monkeypatch):
     assert len(payload["tests"]) == 4
     assert all(item["result"] == "passed" for item in payload["tests"])
 
+
+def test_hostile_agent_evidence_rejects_incomplete_attack_coverage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    evidence = [
+        {
+            "name": "controller isolation",
+            "test_path": "tests/integration/test_controller_isolation.py",
+            "attacks_covered": ["controller_signal"],
+            "result": "passed",
+            "exit_code": 0,
+            "duration_seconds": 0.1,
+        }
+    ]
+
+    try:
+        _write_evidence(evidence, "contained")
+    except ValueError as exc:
+        assert "attack coverage mismatch" in str(exc)
+    else:
+        raise AssertionError("incomplete attack coverage was accepted")
 
 def test_hostile_agent_evidence_rejects_inconsistent_contained_result(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
