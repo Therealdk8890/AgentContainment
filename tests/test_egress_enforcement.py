@@ -14,7 +14,8 @@ def test_noop_kernel_enforcer_does_not_mutate_state():
 def test_linux_enforcer_sets_controller_owned_deny_state(tmp_path: Path):
     state = tmp_path / "egress.state"
     LinuxCgroupEgressEnforcer(str(state)).contain()
-    assert state.read_text() == "deny\n"
+    assert state.read_text() == "deny
+"
 
 
 def test_linux_ebpf_enforcer_invokes_controller(monkeypatch, tmp_path: Path):
@@ -140,4 +141,24 @@ def test_linux_ebpf_external_release_binds_to_cgroup(monkeypatch, tmp_path: Path
         str(pin_dir),
         str(cgroup),
     ]
-\n\n\ndef test_linux_ebpf_external_release_requires_current_controller_proof(tmp_path: Path):\n    cgroup = tmp_path / "agent"\n    cgroup.mkdir()\n    controller = tmp_path / "ctl"\n    controller.write_text("")\n    obj = tmp_path / "policy.o"\n    obj.write_text("")\n    pin_dir = tmp_path / "pin"\n\n    enforcer = __import__(\n        "agent_containment.egress_enforcement",\n        fromlist=["LinuxEbpfExternalEnforcer"],\n    ).LinuxEbpfExternalEnforcer(controller, obj, cgroup, pin_dir)\n\n    result = enforcer.verify_released("agent-1")\n\n    assert result.status.name == "VERIFICATION_FAILED"\n    assert "current controller instance" in result.detail\n
+
+
+
+def test_linux_ebpf_external_release_requires_current_controller_proof(tmp_path: Path):
+    cgroup = tmp_path / "agent"
+    cgroup.mkdir()
+    controller = tmp_path / "ctl"
+    controller.write_text("")
+    obj = tmp_path / "policy.o"
+    obj.write_text("")
+    pin_dir = tmp_path / "pin"
+
+    enforcer = __import__(
+        "agent_containment.egress_enforcement",
+        fromlist=["LinuxEbpfExternalEnforcer"],
+    ).LinuxEbpfExternalEnforcer(controller, obj, cgroup, pin_dir)
+
+    result = enforcer.verify_released("agent-1")
+
+    assert result.status.name == "VERIFICATION_FAILED"
+    assert "current controller instance" in result.detail
