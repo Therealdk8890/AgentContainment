@@ -158,7 +158,7 @@ def _run(
             "duration_seconds": round(duration, 6),
         }
     )
-    return result.returncode
+    return 0 if status == "PASS" else 1
 
 
 def _write_evidence(evidence: list[dict[str, object]], result: str | None = None) -> None:
