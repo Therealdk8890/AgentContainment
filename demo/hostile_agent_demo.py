@@ -23,23 +23,72 @@ from datetime import datetime, timezone
 
 
 TESTS = [
-    (
-        "controller isolation",
-        "tests/integration/test_controller_isolation.py",
-    ),
-    (
-        "cgroup delegation boundary",
-        "tests/integration/test_cgroup_delegation.py",
-    ),
-    (
-        "kernel egress + process containment",
-        "tests/integration/test_linux_ebpf.py",
-    ),
-    (
-        "stale execution lease fencing",
-        "tests/test_epoch_fencing_adversarial.py",
-    ),
+    {
+        "name": "controller isolation",
+        "path": "tests/integration/test_controller_isolation.py",
+        "attacks": (
+            "controller_signal",
+            "controller_ptrace_memory",
+            "controller_ipc_tamper",
+        ),
+    },
+    {
+        "name": "cgroup delegation boundary",
+        "path": "tests/integration/test_cgroup_delegation.py",
+        "attacks": ("cross_boundary_cgroup_migrate",),
+    },
+    {
+        "name": "kernel egress + process containment",
+        "path": "tests/integration/test_linux_ebpf.py",
+        "attacks": (
+            "cgroup_workload_containment",
+            "post_containment_egress",
+        ),
+    },
+    {
+        "name": "stale execution lease fencing",
+        "path": "tests/test_epoch_fencing_adversarial.py",
+        "attacks": ("stale_execution_lease",),
+    },
 ]
+
+ATTACK_MATRIX = (
+    {
+        "attack": "controller_signal",
+        "expected": "denied",
+        "test_path": "tests/integration/test_controller_isolation.py",
+    },
+    {
+        "attack": "controller_ptrace_memory",
+        "expected": "denied",
+        "test_path": "tests/integration/test_controller_isolation.py",
+    },
+    {
+        "attack": "controller_ipc_tamper",
+        "expected": "denied",
+        "test_path": "tests/integration/test_controller_isolation.py",
+    },
+    {
+        "attack": "cross_boundary_cgroup_migrate",
+        "expected": "denied",
+        "test_path": "tests/integration/test_cgroup_delegation.py",
+    },
+    {
+        "attack": "cgroup_workload_containment",
+        "expected": "enforced",
+        "test_path": "tests/integration/test_linux_ebpf.py",
+    },
+    {
+        "attack": "post_containment_egress",
+        "expected": "denied",
+        "test_path": "tests/integration/test_linux_ebpf.py",
+    },
+    {
+        "attack": "stale_execution_lease",
+        "expected": "invalidated",
+        "test_path": "tests/test_epoch_fencing_adversarial.py",
+    },
+)
 
 
 def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
@@ -53,10 +102,12 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
     duration = time.monotonic() - started
     status = "PASS" if result.returncode == 0 else "FAIL"
     print(f"[{status}] {label}")
+    test = next(item for item in TESTS if item["name"] == label and item["path"] == path)
     evidence.append(
         {
             "name": label,
             "test_path": path,
+            "attacks_covered": list(test["attacks"]),
             "result": "passed" if result.returncode == 0 else "failed",
             "exit_code": result.returncode,
             "duration_seconds": round(duration, 6),
@@ -68,6 +119,33 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
 def _write_evidence(evidence: list[dict[str, object]], result: str | None = None) -> None:
     if not evidence:
         raise ValueError("cannot produce hostile-agent evidence without recorded tests")
+    evidence_by_path = {item.get("test_path"): item for item in evidence}
+    if len(evidence_by_path) != len(evidence):
+        raise ValueError("hostile-agent evidence contains duplicate test paths")
+    expected_attacks = {item["attack"] for item in ATTACK_MATRIX}
+    covered_attacks = {
+        attack
+        for item in evidence
+        for attack in item.get("attacks_covered", [])
+    }
+    if covered_attacks != expected_attacks:
+        missing = sorted(expected_attacks - covered_attacks)
+        unexpected = sorted(covered_attacks - expected_attacks)
+        raise ValueError(
+            f"hostile-agent attack coverage mismatch; missing={missing}, unexpected={unexpected}"
+        )
+    for matrix_item in ATTACK_MATRIX:
+        test = evidence_by_path.get(matrix_item["test_path"])
+        if test is None:
+            raise ValueError(
+                f"attack {matrix_item['attack']!r} has no recorded test evidence"
+            )
+        if matrix_item["attack"] not in test.get("attacks_covered", []):
+            raise ValueError(
+                f"attack {matrix_item['attack']!r} is not covered by "
+                f"{matrix_item['test_path']!r}"
+            )
+
     derived_result = "contained" if all(
         item.get("result") == "passed" and item.get("exit_code") == 0 for item in evidence
     ) else "failed"
@@ -91,43 +169,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
             "euid": os.geteuid(),
         },
         "tests": evidence,
-        "attack_matrix": [
-            {
-                "attack": "controller_signal",
-                "expected": "denied",
-                "test_path": "tests/integration/test_controller_isolation.py",
-            },
-            {
-                "attack": "controller_ptrace_memory",
-                "expected": "denied",
-                "test_path": "tests/integration/test_controller_isolation.py",
-            },
-            {
-                "attack": "controller_ipc_tamper",
-                "expected": "denied",
-                "test_path": "tests/integration/test_controller_isolation.py",
-            },
-            {
-                "attack": "cross_boundary_cgroup_migrate",
-                "expected": "denied",
-                "test_path": "tests/integration/test_cgroup_delegation.py",
-            },
-            {
-                "attack": "cgroup_workload_containment",
-                "expected": "enforced",
-                "test_path": "tests/integration/test_linux_ebpf.py",
-            },
-            {
-                "attack": "post_containment_egress",
-                "expected": "denied",
-                "test_path": "tests/integration/test_linux_ebpf.py",
-            },
-            {
-                "attack": "stale_execution_lease",
-                "expected": "invalidated",
-                "test_path": "tests/test_epoch_fencing_adversarial.py",
-            },
-        ],
+        "attack_matrix": list(ATTACK_MATRIX),
         "claims": {
             "scope": "test evidence from temporary resources on the tested Linux host",
             "universal_security_guarantee": False,
