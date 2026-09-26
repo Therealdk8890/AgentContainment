@@ -187,6 +187,11 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         child.wait(timeout=3)
         assert child.returncode == 0
 
+        release = enforcer.release("adversarial-agent")
+        assert release.status.name == "RELEASED"
+        released = enforcer.verify_released("adversarial-agent")
+        assert released.status.name == "RELEASED"
+
         ok, reason = audit.verify()
         assert ok, reason
         events = [
@@ -203,7 +208,7 @@ def test_linux_ebpf_blocks_subprocess_egress_after_containment():
         if child is not None and child.poll() is None:
             child.kill()
             child.wait(timeout=3)
-        subprocess.run([str(controller), "detach", str(pin_dir)], check=False)
+        subprocess.run([str(controller), "detach", str(pin_dir), str(group)], check=False)
         try:
             group.rmdir()
         except OSError:
