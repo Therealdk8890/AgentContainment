@@ -256,6 +256,7 @@ def test_controller_containment_kills_hostile_cgroup_process():
         assert "processes_contained" in report.stages
         child.wait(timeout=3)
         assert child.returncode is not None
+        print("AC_PROOF:cgroup_workload_containment")
     finally:
         if child is not None and child.poll() is None:
             child.kill()
