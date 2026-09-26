@@ -14,8 +14,7 @@ def test_noop_kernel_enforcer_does_not_mutate_state():
 def test_linux_enforcer_sets_controller_owned_deny_state(tmp_path: Path):
     state = tmp_path / "egress.state"
     LinuxCgroupEgressEnforcer(str(state)).contain()
-    assert state.read_text() == "deny
-"
+    assert state.read_text() == "deny\n"
 
 
 def test_linux_ebpf_enforcer_invokes_controller(monkeypatch, tmp_path: Path):
@@ -141,7 +140,6 @@ def test_linux_ebpf_external_release_binds_to_cgroup(monkeypatch, tmp_path: Path
         str(pin_dir),
         str(cgroup),
     ]
-
 
 
 def test_linux_ebpf_external_release_requires_current_controller_proof(tmp_path: Path):
