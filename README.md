@@ -396,9 +396,20 @@ The repository contains:
 - privileged Linux integration tests under tests/integration/;
 - real-host enforcement validation for the Linux/eBPF path;
 - regression fixtures for previously observed incidents;
+- controlled-interleaving security-model tests for containment/recovery ordering;
+- hermetic failure/recovery replay tests that verify durable containment survives incident-persistence failure;
+- structured adversarial proof markers bound to executed test node IDs;
 - release-gate replay tests.
 
 Privileged tests are opt-in and intended for isolated Linux environments.
+
+### Security-model validation
+
+The project now validates more than individual happy-path containment calls. The CI suite includes a controlled-interleaving model that treats public `contain()` and `recover()` operations as linearizable controller-owned operations and explores their ordering. The invariant is that an older recovery authorization cannot make a newer contained runtime executable.
+
+A separate hermetic replay regression injects an incident-persistence failure during containment and then reconstructs the controller from the persisted runtime fence. The durable fence remains authoritative, the runtime remains `CONTAINED`, and execution remains disabled. This tests failure recovery without depending on the original in-memory incident record.
+
+These tests are evidence for the modeled failure and concurrency cases; they are not a formal proof of the entire implementation.
 
 
 ## Hostile-agent demonstration
@@ -412,7 +423,7 @@ bash scripts/build_ebpf.sh
 AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 python demo/hostile_agent_demo.py
 ~~~
 
-The demonstration exercises these concrete attacks and boundaries:
+The demonstration exercises these concrete attacks and boundaries. Each selected test must emit the expected structured proof ID, and the runner binds that evidence to the exact executed pytest node ID before producing `hostile-agent-evidence.json`:
 
 | Hostile action | Expected result |
 |---|---|
@@ -424,7 +435,9 @@ The demonstration exercises these concrete attacks and boundaries:
 | Reconnect after kernel egress containment | Denied |
 | Reuse a stale execution lease | Invalidated |
 
-The runner is intentionally fail-closed: if any selected adversarial proof fails, the demonstration exits non-zero.
+The runner is intentionally fail-closed: if any selected adversarial proof fails, or if expected proof evidence is missing, unexpected, duplicated, or not bound to the executed test node, the demonstration exits non-zero.
+
+The generated evidence records the tested host/kernel context, attack coverage, executed proof IDs, and explicit scope limits. It is structured test evidence, not host attestation or a universal security guarantee.
 
 This is demonstration and regression evidence on the tested Linux host. It is not a universal security guarantee, formal verification, or cryptographic attestation of the host.
 
@@ -461,6 +474,7 @@ Near-term areas include:
 
 - deeper enforcement-provider integrations;
 - broader incident-to-regression workflows;
+- additional concurrency and failure-replay models;
 - stronger external evidence anchoring;
 - deployment hardening and operational guidance;
 - additional multi-agent containment scenarios.
