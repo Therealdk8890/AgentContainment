@@ -102,7 +102,10 @@ def _run(label: str, path: str, evidence: list[dict[str, object]]) -> int:
     duration = time.monotonic() - started
     status = "PASS" if result.returncode == 0 else "FAIL"
     print(f"[{status}] {label}")
-    test = next(item for item in TESTS if item["name"] == label and item["path"] == path)
+    test = next(
+        item for item in TESTS
+        if item["name"] == label and item["path"] == path
+    )
     evidence.append(
         {
             "name": label,
@@ -122,6 +125,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
     evidence_by_path = {item.get("test_path"): item for item in evidence}
     if len(evidence_by_path) != len(evidence):
         raise ValueError("hostile-agent evidence contains duplicate test paths")
+
     expected_attacks = {item["attack"] for item in ATTACK_MATRIX}
     covered_attacks = {
         attack
@@ -134,6 +138,7 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
         raise ValueError(
             f"hostile-agent attack coverage mismatch; missing={missing}, unexpected={unexpected}"
         )
+
     for matrix_item in ATTACK_MATRIX:
         test = evidence_by_path.get(matrix_item["test_path"])
         if test is None:
@@ -147,13 +152,15 @@ def _write_evidence(evidence: list[dict[str, object]], result: str | None = None
             )
 
     derived_result = "contained" if all(
-        item.get("result") == "passed" and item.get("exit_code") == 0 for item in evidence
+        item.get("result") == "passed" and item.get("exit_code") == 0
+        for item in evidence
     ) else "failed"
     if result is not None and result != derived_result:
         raise ValueError(
             f"evidence result {result!r} is inconsistent with recorded test outcomes; "
             f"expected {derived_result!r}"
         )
+
     payload = {
         "schema_version": 1,
         "evidence_type": "hostile_agent_demo",
@@ -202,17 +209,14 @@ def main() -> int:
 
     evidence: list[dict[str, object]] = []
     failures = 0
-    for label, path in TESTS:
-        failures += _run(label, path, evidence)
+    for test in TESTS:
+        failures += _run(test["name"], test["path"], evidence)
 
     print("\n=== ATTACK MATRIX ===")
-    print("controller SIGTERM/SIGKILL      -> denied")
-    print("controller ptrace/memory       -> denied")
-    print("controller IPC/socket tamper   -> denied")
-    print("cross-boundary cgroup migrate -> denied")
-    print("cgroup workload containment    -> enforced")
-    print("post-containment egress        -> denied")
-    print("stale execution lease          -> invalidated")
+    for item in ATTACK_MATRIX:
+        print(
+            f"{item['attack']:<30} -> {item['expected']}"
+        )
     print("")
 
     if failures:
