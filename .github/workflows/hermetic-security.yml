@@ -1,0 +1,22 @@
+name: hermetic-security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-failure-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . pytest hermetic-sandbox
+      - run: python -m pytest -q tests/test_hermetic_failure_replay.py
