@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_containment.proof import record_proof
+
 
 pytestmark = pytest.mark.integration
 
@@ -132,7 +134,7 @@ marker.write_text("passed", encoding="utf-8")
         assert child.returncode == 0, stderr + stdout
         assert marker.read_text(encoding="utf-8") == "passed"
         assert (parent / "agents").is_dir()
-        print("AC_PROOF:cross_boundary_cgroup_migrate")
+        record_proof("cross_boundary_cgroup_migrate")
     finally:
         if child is not None and child.poll() is None:
             child.kill()
