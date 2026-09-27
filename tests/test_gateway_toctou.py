@@ -31,22 +31,15 @@ def test_execution_gateway_closes_lease_check_to_side_effect_race():
     release_check = threading.Event()
     executed = []
 
-    original_lease_valid = runtime.lease_valid
-    calls = 0
-    calls_lock = threading.Lock()
+    original_execute_if_active = runtime.execute_if_active
 
-    def controlled_lease_valid(candidate):
-        nonlocal calls
-        result = original_lease_valid(candidate)
-        with calls_lock:
-            calls += 1
-            current_call = calls
-        if current_call == 2 and result:
-            final_check_passed.set()
-            assert release_check.wait(THREAD_TIMEOUT)
+    def controlled_execute_if_active(candidate, executor):
+        result = original_execute_if_active(candidate, executor)
+        final_check_passed.set()
+        assert release_check.wait(THREAD_TIMEOUT)
         return result
 
-    runtime.lease_valid = controlled_lease_valid
+    runtime.execute_if_active = controlled_execute_if_active
 
     def execute():
         gateway.execute_with_lease(
@@ -78,22 +71,15 @@ def test_egress_gateway_closes_lease_check_to_side_effect_race():
     release_check = threading.Event()
     executed = []
 
-    original_authorize = gateway.egress.authorize
-    calls = 0
-    calls_lock = threading.Lock()
+    original_execute_if_active = runtime.execute_if_active
 
-    def controlled_authorize(candidate):
-        nonlocal calls
-        result = original_authorize(candidate)
-        with calls_lock:
-            calls += 1
-            current_call = calls
-        if current_call == 2 and result:
-            final_check_passed.set()
-            assert release_check.wait(THREAD_TIMEOUT)
+    def controlled_execute_if_active(candidate, executor):
+        result = original_execute_if_active(candidate, executor)
+        final_check_passed.set()
+        assert release_check.wait(THREAD_TIMEOUT)
         return result
 
-    gateway.egress.authorize = controlled_authorize
+    runtime.execute_if_active = controlled_execute_if_active
 
     def execute():
         gateway.execute_egress(
