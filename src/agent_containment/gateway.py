@@ -39,13 +39,19 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
-        if not self.containment.runtime.lease_valid(lease):
+        sentinel = object()
+        result = self.containment.runtime.execute_if_active(
+            lease,
+            lambda: (sentinel, executor(action)),
+        )
+        if result is None:
             decision = Decision(action.action_id, DecisionType.DENY,
                                 "execution lease invalidated before side effect")
             self.history.append(decision)
             return decision
 
-        return executor(action)
+        assert result[0] is sentinel
+        return result[1]
 
     def acquire_egress_lease(self) -> EgressLease | None:
         return self.egress.acquire_lease()
@@ -59,14 +65,38 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
-        if not self.egress.authorize(lease):
+        execution_lease = ExecutionLease(lease.agent_id, lease.epoch)
+        sentinel = object()
+        result = self.containment.runtime.execute_if_active(
+            execution_lease,
+            lambda: (sentinel, executor(action)),
+        )
+        if result is None:
             return Decision(action.action_id, DecisionType.DENY,
                             "egress lease invalidated before network side effect")
 
-        return executor(action)
+        assert result[0] is sentinel
+        return result[1]
 
     def execute(self, action: Action, executor):
+        lease = self.acquire_lease()
+        if lease is None:
+            return self.authorize(action)
+
         decision = self.authorize(action)
         if decision.decision is not DecisionType.ALLOW:
             return decision
-        return executor(action)
+
+        sentinel = object()
+        result = self.containment.runtime.execute_if_active(
+            lease,
+            lambda: (sentinel, executor(action)),
+        )
+        if result is None:
+            decision = Decision(action.action_id, DecisionType.DENY,
+                                "execution lease invalidated before side effect")
+            self.history.append(decision)
+            return decision
+
+        assert result[0] is sentinel
+        return result[1]
