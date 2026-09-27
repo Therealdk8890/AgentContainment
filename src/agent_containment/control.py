@@ -498,6 +498,33 @@ class ContainmentService:
                 )
             return report
 
+    def reconcile_containment(self, agent_id: str) -> tuple[str, ...]:
+        """Reconcile external enforcement for a durably contained agent.
+
+        Restart recovery is fail-closed: a controller may rebuild the runtime
+        from durable state, but it must revalidate every configured external
+        enforcement boundary before issuing a new recovery authorization.
+        Reconciliation never advances the runtime epoch or enables execution.
+        """
+        with self._lock:
+            managed = self._managed(agent_id)
+            incident = self.incidents.latest_for_agent(agent_id)
+            durable_fence = self.fences.get(agent_id)
+            if incident is None or incident.state not in (
+                IncidentState.CONTAINED,
+                IncidentState.PROOF_DEGRADED,
+            ):
+                raise RuntimeError("agent has no durably recoverable containment incident")
+            if durable_fence is None:
+                raise RuntimeError("agent has no durable containment fence")
+            if durable_fence.containment_epoch != incident.containment_epoch:
+                raise RuntimeError("durable fence epoch does not match containment incident")
+            if managed.runtime.state is not RuntimeState.CONTAINED:
+                raise RuntimeError("runtime is not contained")
+            if managed.runtime.epoch != incident.containment_epoch:
+                raise RuntimeError("runtime epoch does not match durable containment")
+            return managed.containment.recontain_enforcers()
+
     def issue_recovery_authorization(self, agent_id: str) -> RecoveryAuthorization:
         """Issue a controller-scoped recovery authorization for a contained agent."""
         with self._lock:
@@ -512,6 +539,12 @@ class ContainmentService:
                 raise RuntimeError("runtime is not contained")
             if managed.runtime.epoch != incident.containment_epoch:
                 raise RuntimeError("runtime epoch does not match durable containment")
+            reconciliation_failures = self.reconcile_containment(agent_id)
+            if reconciliation_failures:
+                raise RuntimeError(
+                    "recovery authorization blocked; containment reconciliation failed: "
+                    + "; ".join(reconciliation_failures)
+                )
             self._emit_event("recovery_requested", agent_id=agent_id, incident_id=incident.incident_id, containment_epoch=incident.containment_epoch)
             return RecoveryAuthorization(
                 agent_id=agent_id,
