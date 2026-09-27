@@ -79,7 +79,24 @@ class ActionGateway:
         return result[1]
 
     def execute(self, action: Action, executor):
+        lease = self.acquire_lease()
+        if lease is None:
+            return self.authorize(action)
+
         decision = self.authorize(action)
         if decision.decision is not DecisionType.ALLOW:
             return decision
-        return executor(action)
+
+        sentinel = object()
+        result = self.containment.runtime.execute_if_active(
+            lease,
+            lambda: (sentinel, executor(action)),
+        )
+        if result is None:
+            decision = Decision(action.action_id, DecisionType.DENY,
+                                "execution lease invalidated before side effect")
+            self.history.append(decision)
+            return decision
+
+        assert result[0] is sentinel
+        return result[1]
