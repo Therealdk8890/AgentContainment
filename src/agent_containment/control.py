@@ -209,23 +209,55 @@ class ContainmentService:
     def authorize(self, action: Action, *, identity_token: str | None = None,
                   peer_pid: int | None = None,
                   cgroup_membership: Callable[[int, str], bool] | None = None) -> Decision:
-        managed = self._managed(action.agent_id)
+        # Snapshot controller-owned identity state before consulting the
+        # external cgroup-membership predicate. That predicate must not run
+        # while the service lock is held.
+        with self._lock:
+            managed = self._managed(action.agent_id)
+            identity_digest = managed.identity_digest
+            identity_pid = managed.identity_pid
+            identity_cgroup = managed.identity_cgroup
+            runtime_epoch = managed.runtime.epoch
+            runtime_active = managed.runtime.can_execute
+
         authenticated = (
             bool(identity_token)
-            and managed.identity_digest is not None
-            and self._token_matches(identity_token, managed.identity_digest)
-            and (managed.identity_pid is None or peer_pid == managed.identity_pid)
-            and managed.identity_cgroup is not None
+            and identity_digest is not None
+            and self._token_matches(identity_token, identity_digest)
+            and (identity_pid is None or peer_pid == identity_pid)
+            and identity_cgroup is not None
             and peer_pid is not None
             and cgroup_membership is not None
-            and cgroup_membership(peer_pid, managed.identity_cgroup)
+            and cgroup_membership(peer_pid, identity_cgroup)
         )
         if not authenticated:
             decision = Decision(action.action_id, DecisionType.DENY, "agent identity is not authenticated")
-        elif not managed.runtime.can_execute:
+        elif not runtime_active:
             decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
         else:
-            decision = managed.policy.evaluate(action)
+            # Revalidate the controller-owned trust boundary under the same
+            # service lock used by containment before committing a policy
+            # decision. This prevents a stale ALLOW from being produced after
+            # containment revoked the identity or advanced the runtime epoch.
+            with self._lock:
+                current = self._managed(action.agent_id)
+                identity_unchanged = (
+                    current.identity_digest == identity_digest
+                    and current.identity_pid == identity_pid
+                    and current.identity_cgroup == identity_cgroup
+                )
+                runtime_unchanged = (
+                    current.runtime.can_execute
+                    and current.runtime.epoch == runtime_epoch
+                )
+                if not identity_unchanged or not runtime_unchanged:
+                    decision = Decision(
+                        action.action_id,
+                        DecisionType.DENY,
+                        "agent identity is no longer authorized",
+                    )
+                else:
+                    decision = current.policy.evaluate(action)
 
         if decision.decision is DecisionType.HALT:
             managed.containment.halt()

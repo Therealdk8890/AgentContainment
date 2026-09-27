@@ -206,3 +206,49 @@ def test_create_workload_is_controller_owned_and_unique():
         assert "already exists" in str(exc)
     else:
         raise AssertionError("duplicate workload creation must fail")
+
+
+def test_authorization_is_fenced_against_concurrent_containment():
+    import threading
+
+    class FakeSupervisor:
+        def create_agent(self, agent_id):
+            return f"/sys/fs/cgroup/{agent_id}"
+
+        def attach_pid(self, path, pid):
+            return None
+
+    service = ContainmentService(cgroup_supervisor=FakeSupervisor())
+    service.register("agent-race")
+    service.create_workload("agent-race")
+    token = service.issue_identity_token("agent-race", peer_pid=123)
+    action = Action("agent-race", "race-1", "read", "workspace")
+
+    membership_entered = threading.Event()
+    release_membership = threading.Event()
+    result = {}
+
+    def membership(pid, path):
+        membership_entered.set()
+        assert release_membership.wait(timeout=2)
+        return True
+
+    def authorize():
+        result["decision"] = service.authorize(
+            action,
+            identity_token=token,
+            peer_pid=123,
+            cgroup_membership=membership,
+        )
+
+    authorize_thread = threading.Thread(target=authorize)
+    authorize_thread.start()
+    assert membership_entered.wait(timeout=2)
+
+    service.contain("agent-race")
+    release_membership.set()
+    authorize_thread.join(timeout=2)
+
+    assert not authorize_thread.is_alive()
+    assert result["decision"].decision is DecisionType.DENY
+    assert result["decision"].reason == "agent identity is no longer authorized"
