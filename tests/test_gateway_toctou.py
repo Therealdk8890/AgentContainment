@@ -34,10 +34,9 @@ def test_execution_gateway_closes_lease_check_to_side_effect_race():
     original_execute_if_active = runtime.execute_if_active
 
     def controlled_execute_if_active(candidate, executor):
-        result = original_execute_if_active(candidate, executor)
         final_check_passed.set()
         assert release_check.wait(THREAD_TIMEOUT)
-        return result
+        return original_execute_if_active(candidate, executor)
 
     runtime.execute_if_active = controlled_execute_if_active
 
@@ -74,10 +73,9 @@ def test_egress_gateway_closes_lease_check_to_side_effect_race():
     original_execute_if_active = runtime.execute_if_active
 
     def controlled_execute_if_active(candidate, executor):
-        result = original_execute_if_active(candidate, executor)
         final_check_passed.set()
         assert release_check.wait(THREAD_TIMEOUT)
-        return result
+        return original_execute_if_active(candidate, executor)
 
     runtime.execute_if_active = controlled_execute_if_active
 
