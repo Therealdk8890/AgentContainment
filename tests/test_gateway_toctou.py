@@ -97,3 +97,39 @@ def test_egress_gateway_closes_lease_check_to_side_effect_race():
     assert not worker.is_alive()
     assert runtime.state is RuntimeState.CONTAINED
     assert executed == []
+
+
+def test_unleased_gateway_execution_is_fenced_before_side_effect():
+    """The convenience execution path must use the same atomic fence."""
+    runtime, controller, gateway = make_gateway()
+
+    final_check_passed = threading.Event()
+    release_check = threading.Event()
+    executed = []
+
+    original_execute_if_active = runtime.execute_if_active
+
+    def controlled_execute_if_active(candidate, executor):
+        final_check_passed.set()
+        assert release_check.wait(THREAD_TIMEOUT)
+        return original_execute_if_active(candidate, executor)
+
+    runtime.execute_if_active = controlled_execute_if_active
+
+    def execute():
+        gateway.execute(
+            Action("agent-1", "a2", "write", "resource"),
+            lambda action: executed.append("SIDE EFFECT"),
+        )
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+
+    assert final_check_passed.wait(THREAD_TIMEOUT)
+    controller.contain()
+    release_check.set()
+
+    worker.join(timeout=THREAD_TIMEOUT)
+    assert not worker.is_alive()
+    assert runtime.state is RuntimeState.CONTAINED
+    assert executed == []
