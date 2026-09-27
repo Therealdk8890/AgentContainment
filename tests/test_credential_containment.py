@@ -79,3 +79,58 @@ def test_concurrent_revoke_race_invalidates_lease():
     assert runtime.state is RuntimeState.CONTAINED
     assert not credentials.valid(lease)
     assert observed in ([True], [False])
+
+
+def test_credential_use_is_atomic_with_revoke():
+    runtime = Runtime("agent-1")
+    credentials = CredentialStore()
+    lease = credentials.issue("prod-api")
+    controller = ContainmentController(runtime, credentials=credentials)
+
+    entered = threading.Event()
+    release = threading.Event()
+    executed = []
+
+    def use_credential():
+        def executor():
+            entered.set()
+            assert release.wait(timeout=THREAD_TIMEOUT)
+            executed.append("used")
+            return "ok"
+
+        result = credentials.execute_if_valid(lease, executor)
+        assert result == "ok"
+
+    use_thread = threading.Thread(target=use_credential)
+    use_thread.start()
+    assert entered.wait(timeout=THREAD_TIMEOUT)
+
+    contain_thread = threading.Thread(target=controller.contain)
+    contain_thread.start()
+
+    # Revocation must wait for the credential-use boundary to finish.
+    release.set()
+    use_thread.join(timeout=THREAD_TIMEOUT)
+    contain_thread.join(timeout=THREAD_TIMEOUT)
+
+    assert not use_thread.is_alive()
+    assert not contain_thread.is_alive()
+    assert executed == ["used"]
+    assert not credentials.valid(lease)
+    assert runtime.state is RuntimeState.CONTAINED
+
+
+def test_stale_credential_use_is_rejected_without_side_effect():
+    runtime = Runtime("agent-1")
+    credentials = CredentialStore()
+    lease = credentials.issue("prod-api")
+    controller = ContainmentController(runtime, credentials=credentials)
+
+    controller.contain()
+    executed = []
+
+    assert credentials.execute_if_valid(
+        lease,
+        lambda: executed.append("used"),
+    ) is None
+    assert executed == []

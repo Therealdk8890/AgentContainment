@@ -39,3 +39,13 @@ class CredentialStore:
                 lease.credential_id in self.credentials
                 and lease.epoch == self._epochs.get(lease.credential_id, 0)
             )
+
+    def execute_if_valid(self, lease: CredentialLease, executor):
+        """Atomically validate a lease and start its modeled side effect."""
+        with self._lock:
+            if not (
+                lease.credential_id in self.credentials
+                and lease.epoch == self._epochs.get(lease.credential_id, 0)
+            ):
+                return None
+            return executor()
