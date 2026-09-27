@@ -19,9 +19,9 @@ def make_gateway():
 def test_execution_gateway_closes_lease_check_to_side_effect_race():
     """Containment must not allow a stale lease past the gateway boundary.
 
-    This deliberately pauses the gateway immediately after its final
-    lease_valid() check returns True. If containment can complete before the
-    executor starts, the gateway currently has a TOCTOU window.
+    This deliberately pauses the gateway at the atomic execution boundary,
+    after authorization has passed but before the side effect can begin. If
+    containment can complete there, the stale lease must be rejected.
     """
     runtime, controller, gateway = make_gateway()
     lease = gateway.acquire_lease()
