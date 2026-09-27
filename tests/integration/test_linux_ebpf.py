@@ -290,3 +290,131 @@ def test_controller_containment_kills_hostile_cgroup_process():
             marker_dir.rmdir()
         except OSError:
             pass
+
+
+def test_hostile_agent_cannot_release_ebpf_containment():
+    """Prove an unprivileged workload cannot remove or detach its kernel egress fence."""
+    if sys.platform != "linux":
+        pytest.skip("Linux eBPF integration test")
+    if os.geteuid() != 0:
+        pytest.skip("requires root for cgroup and BPF operations")
+    if os.environ.get("AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS") != "1":
+        pytest.skip("set AGENT_CONTAINMENT_RUN_PRIVILEGED_TESTS=1 to run")
+
+    root = Path("/sys/fs/cgroup")
+    if not (root / "cgroup.controllers").exists():
+        pytest.skip("cgroup v2 is unavailable")
+
+    controller = Path("build/agent_containment_ebpf_ctl")
+    obj = Path("build/agent_containment_egress.bpf.o")
+    if not controller.exists() or not obj.exists():
+        pytest.skip("build eBPF artifacts first")
+
+    group = root / f"agent-containment-tamper-test-{os.getpid()}"
+    pin_dir = Path("/sys/fs/bpf") / f"agent-containment-tamper-test-{os.getpid()}"
+    marker_dir = Path(tempfile.mkdtemp(prefix="agent-containment-tamper-"))
+    child = None
+
+    try:
+        group.mkdir()
+        enforcer = LinuxEbpfExternalEnforcer(
+            str(controller), str(obj), str(group), str(pin_dir)
+        )
+        runtime = Runtime("hostile-tamper-agent")
+        containment = ContainmentController(runtime, enforcers=[enforcer])
+        service = ContainmentService()
+        service.register("hostile-tamper-agent", containment=containment)
+
+        report = service.contain("hostile-tamper-agent")
+        assert report.certified
+        assert (pin_dir / "egress_link").exists()
+
+        child_code = r"""
+import os
+import subprocess
+import sys
+
+pin_path = sys.argv[1]
+controller = sys.argv[2]
+pin_dir = sys.argv[3]
+group = sys.argv[4]
+
+results = {}
+
+try:
+    os.unlink(pin_path)
+    results["unlink_pin"] = "unexpectedly_allowed"
+except (PermissionError, OSError):
+    results["unlink_pin"] = "denied"
+
+try:
+    with open(group + "/cgroup.procs", "w") as handle:
+        handle.write(str(os.getpid()))
+    results["cgroup_tamper"] = "unexpectedly_allowed"
+except (PermissionError, OSError):
+    results["cgroup_tamper"] = "denied"
+
+detach = subprocess.run(
+    [controller, "detach", pin_dir, group],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+results["detach"] = "unexpectedly_allowed" if detach.returncode == 0 else "denied"
+
+print(results)
+if results != {
+    "unlink_pin": "denied",
+    "cgroup_tamper": "denied",
+    "detach": "denied",
+}:
+    raise SystemExit(1)
+"""
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                child_code,
+                str(pin_dir / "egress_link"),
+                str(controller),
+                str(pin_dir),
+                str(group),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            preexec_fn=lambda: os.setuid(65534),
+        )
+        stdout, stderr = child.communicate(timeout=5)
+        assert child.returncode == 0, stderr + stdout
+
+        verify = subprocess.run(
+            [str(controller), "verify", str(pin_dir), str(group)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert verify.returncode == 0, verify.stderr + verify.stdout
+        record_proof("hostile_agent_cannot_release_ebpf")
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill()
+            child.wait(timeout=3)
+        subprocess.run(
+            [str(controller), "detach", str(pin_dir), str(group)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            group.rmdir()
+        except OSError:
+            pass
+        try:
+            pin_dir.rmdir()
+        except OSError:
+            pass
+        try:
+            marker_dir.rmdir()
+        except OSError:
+            pass
