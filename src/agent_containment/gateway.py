@@ -39,13 +39,17 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
-        if not self.containment.runtime.lease_valid(lease):
+        result = self.containment.runtime.execute_if_active(
+            lease,
+            lambda: executor(action),
+        )
+        if result is None:
             decision = Decision(action.action_id, DecisionType.DENY,
                                 "execution lease invalidated before side effect")
             self.history.append(decision)
             return decision
 
-        return executor(action)
+        return result
 
     def acquire_egress_lease(self) -> EgressLease | None:
         return self.egress.acquire_lease()
@@ -59,11 +63,16 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
-        if not self.egress.authorize(lease):
+        execution_lease = ExecutionLease(lease.agent_id, lease.epoch)
+        result = self.containment.runtime.execute_if_active(
+            execution_lease,
+            lambda: executor(action),
+        )
+        if result is None:
             return Decision(action.action_id, DecisionType.DENY,
                             "egress lease invalidated before network side effect")
 
-        return executor(action)
+        return result
 
     def execute(self, action: Action, executor):
         decision = self.authorize(action)
