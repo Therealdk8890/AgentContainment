@@ -39,9 +39,10 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
+        sentinel = object()
         result = self.containment.runtime.execute_if_active(
             lease,
-            lambda: executor(action),
+            lambda: (sentinel, executor(action)),
         )
         if result is None:
             decision = Decision(action.action_id, DecisionType.DENY,
@@ -49,7 +50,8 @@ class ActionGateway:
             self.history.append(decision)
             return decision
 
-        return result
+        assert result[0] is sentinel
+        return result[1]
 
     def acquire_egress_lease(self) -> EgressLease | None:
         return self.egress.acquire_lease()
@@ -64,15 +66,17 @@ class ActionGateway:
             return decision
 
         execution_lease = ExecutionLease(lease.agent_id, lease.epoch)
+        sentinel = object()
         result = self.containment.runtime.execute_if_active(
             execution_lease,
-            lambda: executor(action),
+            lambda: (sentinel, executor(action)),
         )
         if result is None:
             return Decision(action.action_id, DecisionType.DENY,
                             "egress lease invalidated before network side effect")
 
-        return result
+        assert result[0] is sentinel
+        return result[1]
 
     def execute(self, action: Action, executor):
         decision = self.authorize(action)
