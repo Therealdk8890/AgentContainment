@@ -9,7 +9,7 @@ A naive implementation can do this:
 3. credentials are revoked
 4. the already-authorized action executes
 
-AgentContainment now uses **execution epochs and leases** as an in-process reference mechanism.
+AgentContainment uses **execution epochs and leases** as an in-process reference mechanism.
 
 ## Execution lease
 
@@ -17,13 +17,23 @@ An active runtime can issue a short-lived `ExecutionLease` containing the runtim
 
 Containment or halt increments that epoch. Any lease issued before the state transition becomes invalid.
 
-The gateway checks the lease:
+The gateway's side-effect paths are fenced in three stages:
 
-- before authorization
-- after authorization
-- immediately before the modeled side effect
+1. acquire an epoch-bound execution lease
+2. evaluate the policy authorization
+3. route the final side-effect start through the atomic `Runtime.execute_if_active()` gate
 
-This prevents a stale authorization lease from being treated as valid after a containment transition.
+The atomic gate validates the lease and active runtime state while holding the runtime lock, then invokes the modeled executor before releasing that lock. This closes the TOCTOU window between the final validation and invocation: containment or halt cannot advance the runtime epoch between those two operations.
+
+The gateway applies this boundary to all three execution paths:
+
+- `execute_with_lease()`
+- `execute_egress()`
+- the convenience `execute()` path
+
+This is stronger than performing a second `lease_valid()` check immediately before calling the executor. A check followed by a separate call still leaves a race window; `execute_if_active()` makes the modeled side-effect start one atomic operation with respect to the runtime state transition.
+
+The boundary is intentionally limited. Holding the runtime lock proves that the modeled side effect was not **started through the gateway** after the lease was invalidated. It does not cancel an external operation that was already started, nor does it make an abstract in-process executor equivalent to provider- or kernel-enforced revocation. Production adapters must provide the corresponding real enforcement at the side-effect boundary—for example cancellation/revocation semantics, network policy, process/container controls, or provider-specific credential invalidation.
 
 ## Credential lease
 
@@ -39,4 +49,6 @@ It is:
 
 > A credential or execution authority issued before containment cannot authorize a new side effect after containment.
 
-The implementation should be tested under concurrency and failure injection as the real adapters are added.
+For execution authority, the gateway TOCTOU regression tests exercise the critical interleaving: containment advances the runtime epoch at the atomic execution boundary, and the executor must not run.
+
+The implementation should continue to be tested under concurrency and failure injection as the real adapters are added.
