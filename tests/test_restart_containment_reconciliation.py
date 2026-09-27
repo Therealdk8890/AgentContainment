@@ -33,6 +33,8 @@ def test_restart_reconciles_external_containment_before_recovery(monkeypatch, tm
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
+        if len(cmd) > 1 and cmd[1] == "detach":
+            pin_dir.joinpath("egress_link").unlink(missing_ok=True)
         return Result()
 
     monkeypatch.setattr(
@@ -42,13 +44,19 @@ def test_restart_reconciles_external_containment_before_recovery(monkeypatch, tm
     first = ContainmentService(incidents=IncidentRegistry(incident_path))
     first.register(
         "agent-restart-proof",
-        containment=ContainmentController(Runtime("agent-restart-proof"), enforcers=[first_enforcer]),
+        containment=ContainmentController(
+            Runtime("agent-restart-proof"), enforcers=[first_enforcer]
+        ),
     )
     report = first.contain("agent-restart-proof")
     assert report.epoch == 1
     assert report.external_verified
     assert pin_dir.joinpath("egress_link").exists()
 
+    # Recreate the surviving external-enforcement artifact after the first
+    # controller's test fixture has established containment. A fresh
+    # controller instance must reconcile that existing boundary.
+    pin_dir.joinpath("egress_link").write_text("pinned")
     second_enforcer = LinuxEbpfExternalEnforcer(
         tmp_path / "ctl", tmp_path / "policy.o", tmp_path / "agent", pin_dir
     )
@@ -57,7 +65,9 @@ def test_restart_reconciles_external_containment_before_recovery(monkeypatch, tm
     restarted_runtime.restore_contained(1)
     runtime = second.register(
         "agent-restart-proof",
-        containment=ContainmentController(restarted_runtime, enforcers=[second_enforcer]),
+        containment=ContainmentController(
+            restarted_runtime, enforcers=[second_enforcer]
+        ),
     )
 
     assert runtime.state is RuntimeState.CONTAINED
@@ -79,8 +89,10 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
     incident_path = tmp_path / "incidents.json"
     first_enforcer, pin_dir = _ebpf_controller(tmp_path / "shared")
     second_enforcer = LinuxEbpfExternalEnforcer(
-        tmp_path / "shared" / "ctl", tmp_path / "shared" / "policy.o",
-        tmp_path / "shared" / "agent", pin_dir
+        tmp_path / "shared" / "ctl",
+        tmp_path / "shared" / "policy.o",
+        tmp_path / "shared" / "agent",
+        pin_dir,
     )
 
     class Result:
@@ -88,30 +100,47 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
         stderr = ""
         stdout = ""
 
-    first = ContainmentService(incidents=IncidentRegistry(incident_path))
-    first.register(
-        "agent-restart-block",
-        containment=ContainmentController(Runtime("agent-restart-block"), enforcers=[first_enforcer]),
-    )
-    assert first.contain("agent-restart-block").complete
-
     def fake_run(cmd, **kwargs):
-        if cmd[1] == "verify" and str(second_enforcer._pin_dir) in cmd:
-            return type("Result", (), {
-                "returncode": 1,
-                "stderr": "wrong target",
-                "stdout": "",
-            })()
         return Result()
 
     monkeypatch.setattr(
         "agent_containment.egress_enforcement.subprocess.run", fake_run
     )
 
+    first = ContainmentService(incidents=IncidentRegistry(incident_path))
+    first.register(
+        "agent-restart-block",
+        containment=ContainmentController(
+            Runtime("agent-restart-block"), enforcers=[first_enforcer]
+        ),
+    )
+    assert first.contain("agent-restart-block").complete
+
+    def fail_restart_verify(cmd, **kwargs):
+        if len(cmd) > 1 and cmd[1] == "verify" and str(second_enforcer._pin_dir) in cmd:
+            return type(
+                "Result",
+                (),
+                {
+                    "returncode": 1,
+                    "stderr": "wrong target",
+                    "stdout": "",
+                },
+            )()
+        return Result()
+
+    monkeypatch.setattr(
+        "agent_containment.egress_enforcement.subprocess.run", fail_restart_verify
+    )
+
     second = ContainmentService(incidents=IncidentRegistry(incident_path))
+    restarted_runtime = Runtime("agent-restart-block")
+    restarted_runtime.restore_contained(1)
     runtime = second.register(
         "agent-restart-block",
-        containment=ContainmentController(Runtime("agent-restart-block"), enforcers=[second_enforcer]),
+        containment=ContainmentController(
+            restarted_runtime, enforcers=[second_enforcer]
+        ),
     )
 
     with pytest.raises(RuntimeError, match="reconciliation failed"):
