@@ -96,3 +96,113 @@ def test_recovery_does_not_clear_fence_if_fence_persistence_fails(tmp_path):
 
     assert runtime.state is RuntimeState.CONTAINED
     assert runtime.acquire_lease() is None
+
+
+def test_restart_reconciles_after_crash_after_external_release(tmp_path):
+    """A crash after release but before durable recovery must fail closed."""
+    from agent_containment.containment import ContainmentController
+    from agent_containment.enforcer import EnforcementStatus
+    from agent_containment.runtime import Runtime
+
+    class SharedEnforcer:
+        name = "shared-recovery-boundary"
+
+        def __init__(self):
+            self.released = False
+            self.contain_calls = 0
+            self.release_calls = 0
+
+        def contain(self, agent_id):
+            self.contain_calls += 1
+            self.released = False
+            return type("Result", (), {
+                "status": EnforcementStatus.ENFORCED,
+                "detail": "",
+            })()
+
+        def verify_contained(self, agent_id):
+            return type("Result", (), {
+                "status": EnforcementStatus.ENFORCED,
+                "detail": "",
+            })()
+
+        def release(self, agent_id):
+            self.release_calls += 1
+            self.released = True
+            return type("Result", (), {
+                "status": EnforcementStatus.RELEASED,
+                "detail": "",
+            })()
+
+        def verify_released(self, agent_id):
+            return type("Result", (), {
+                "status": EnforcementStatus.RELEASED,
+                "detail": "",
+            })()
+
+    class CrashAfterReleaseRegistry(IncidentRegistry):
+        def mark_recovered(self, incident_id):
+            raise SystemExit("simulated controller crash")
+
+    incident_path = tmp_path / "incidents.json"
+    fence_path = tmp_path / "fences.json"
+    enforcer = SharedEnforcer()
+
+    first = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    first.register(
+        "agent-recovery-crash",
+        containment=ContainmentController(
+            Runtime("agent-recovery-crash"),
+            enforcers=[enforcer],
+        ),
+    )
+    first.contain("agent-recovery-crash")
+    assert enforcer.contain_calls == 1
+
+    crashing = ContainmentService(
+        incidents=CrashAfterReleaseRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    runtime = Runtime("agent-recovery-crash")
+    runtime.restore_contained(1)
+    crashing.register(
+        "agent-recovery-crash",
+        containment=ContainmentController(runtime, enforcers=[enforcer]),
+    )
+    authorization = crashing.issue_recovery_authorization("agent-recovery-crash")
+
+    with pytest.raises(SystemExit, match="simulated controller crash"):
+        crashing.recover("agent-recovery-crash", authorization)
+
+    # The crash window is intentionally before durable RECOVERED state.
+    assert enforcer.released
+    assert crashing.fences.get("agent-recovery-crash") is None
+    assert crashing.incident("agent-recovery-crash").state.value == "contained"
+
+    restarted = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    restarted_runtime = Runtime("agent-recovery-crash")
+    restarted_runtime.restore_contained(1)
+    restarted.register(
+        "agent-recovery-crash",
+        containment=ContainmentController(
+            restarted_runtime,
+            enforcers=[enforcer],
+        ),
+    )
+
+    # Recovery authorization must reconcile and re-establish the external
+    # containment boundary before any new authorization is issued.
+    before = enforcer.contain_calls
+    fresh_authorization = restarted.issue_recovery_authorization("agent-recovery-crash")
+    assert enforcer.contain_calls == before + 1
+    assert not enforcer.released
+    assert restarted.fences.get("agent-recovery-crash") is None
+
+    assert restarted.recover("agent-recovery-crash", fresh_authorization) == 2
+    assert restarted_runtime.state.value == "active"
