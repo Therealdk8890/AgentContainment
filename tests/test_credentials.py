@@ -83,3 +83,38 @@ def test_runtime_bound_execution_cannot_cross_containment_boundary():
         lambda: executed.append("after"),
     ) is None
     assert executed == ["before"]
+
+
+def test_runtime_bound_issuance_cannot_commit_after_concurrent_containment():
+    from threading import Barrier, Thread
+
+    runtime = Runtime("agent-race")
+    store = CredentialStore(runtime=runtime)
+    barrier = Barrier(2)
+    issued: list[object] = []
+    errors: list[Exception] = []
+
+    original_issue_if_active = runtime.issue_if_active
+
+    def gated_issue(issuer):
+        barrier.wait()
+        return original_issue_if_active(issuer)
+
+    runtime.issue_if_active = gated_issue
+
+    def issue():
+        try:
+            issued.append(store.issue("prod-api"))
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = Thread(target=issue)
+    worker.start()
+    barrier.wait()
+    runtime.contain()
+    worker.join()
+
+    assert not errors
+    assert runtime.state.value == "contained"
+    if issued:
+        assert not store.valid(issued[0])
