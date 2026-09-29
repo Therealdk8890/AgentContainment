@@ -21,17 +21,20 @@ class CredentialStore:
 
     def issue(self, credential_id: str) -> CredentialLease:
         if self.runtime is not None:
-            # Runtime.acquire_lease() checks ACTIVE and captures the epoch under
-            # one runtime lock, so issuance cannot observe ACTIVE at one epoch
-            # and mint authority after the runtime has fenced.
-            runtime_lease = self.runtime.acquire_lease()
-            if runtime_lease is None:
+            # Keep the runtime fence lock held through credential-store
+            # mutation. This closes the issuance/containment interleave:
+            # containment cannot fence the runtime between the ACTIVE check and
+            # recording the newly issued authority.
+            def issue(runtime_lease):
+                with self._lock:
+                    self.credentials.add(credential_id)
+                    self._epochs[credential_id] = runtime_lease.epoch
+                    return CredentialLease(credential_id, runtime_lease.epoch)
+
+            lease = self.runtime.issue_if_active(issue)
+            if lease is None:
                 raise RuntimeError("credential issuance requires an active runtime")
-            epoch = runtime_lease.epoch
-            with self._lock:
-                self.credentials.add(credential_id)
-                self._epochs[credential_id] = epoch
-                return CredentialLease(credential_id, epoch)
+            return lease
 
         with self._lock:
             epoch = self._epochs.get(credential_id, 0)
