@@ -73,7 +73,7 @@ def test_runtime_bound_execution_cannot_cross_containment_boundary():
     assert store.execute_if_valid(
         lease,
         lambda: executed.append("before"),
-    ) == None
+    ) is None
     assert executed == ["before"]
 
     runtime.contain()
