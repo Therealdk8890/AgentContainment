@@ -85,20 +85,27 @@ def test_runtime_bound_execution_cannot_cross_containment_boundary():
     assert executed == ["before"]
 
 
-def test_runtime_bound_issuance_cannot_commit_after_concurrent_containment():
-    from threading import Barrier, Thread
+
+def test_runtime_bound_issuance_is_atomic_with_concurrent_containment():
+    from threading import Event, Thread
 
     runtime = Runtime("agent-race")
     store = CredentialStore(runtime=runtime)
-    barrier = Barrier(2)
+    entered = Event()
+    release = Event()
+    contained = Event()
     issued: list[object] = []
     errors: list[Exception] = []
 
     original_issue_if_active = runtime.issue_if_active
 
     def gated_issue(issuer):
-        barrier.wait()
-        return original_issue_if_active(issuer)
+        def wrapped(runtime_lease):
+            entered.set()
+            assert release.wait(timeout=5)
+            return issuer(runtime_lease)
+
+        return original_issue_if_active(wrapped)
 
     runtime.issue_if_active = gated_issue
 
@@ -108,13 +115,28 @@ def test_runtime_bound_issuance_cannot_commit_after_concurrent_containment():
         except Exception as exc:
             errors.append(exc)
 
-    worker = Thread(target=issue)
-    worker.start()
-    barrier.wait()
-    runtime.contain()
-    worker.join()
+    def contain():
+        runtime.contain()
+        contained.set()
+
+    issuer_thread = Thread(target=issue)
+    issuer_thread.start()
+    assert entered.wait(timeout=5)
+
+    containment_thread = Thread(target=contain)
+    containment_thread.start()
+
+    # The issuer callback is executing while Runtime.issue_if_active holds the
+    # runtime lock. Containment therefore cannot cross the authority boundary
+    # until issuance has committed.
+    assert not contained.wait(timeout=0.1)
+    release.set()
+
+    issuer_thread.join(timeout=5)
+    containment_thread.join(timeout=5)
 
     assert not errors
+    assert len(issued) == 1
+    assert contained.is_set()
     assert runtime.state.value == "contained"
-    if issued:
-        assert not store.valid(issued[0])
+    assert not store.valid(issued[0])
