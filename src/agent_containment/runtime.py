@@ -17,16 +17,6 @@ class ExecutionLease:
     epoch: int
 
 
-@dataclass(frozen=True)
-class RuntimeSnapshot:
-    """Atomic controller-runtime observation bound to one execution epoch."""
-
-    agent_id: str
-    epoch: int
-    state: RuntimeState
-    can_execute: bool
-
-
 class _RecoveryCapability:
     """Controller-owned capability required for runtime recovery."""
 
@@ -59,8 +49,7 @@ class Runtime:
 
         Recovery is an exact state reconstruction, not a new containment
         event, so the persisted epoch remains authoritative. This is used
-        only by the controller while rebuilding runtime state from durable
-        incident state.
+        only by the controller while rebuilding runtime state from durable incident state.
         """
         if epoch < 0:
             raise ValueError("epoch must be non-negative")
@@ -116,21 +105,6 @@ class Runtime:
         with self._lock:
             self.state = RuntimeState.ACTIVE
             self._epoch = epoch
-
-    def snapshot(self) -> RuntimeSnapshot:
-        """Return one atomic runtime observation.
-
-        Consumers can independently derive evidence from this snapshot rather
-        than accepting a controller-emitted governance event as proof of
-        runtime state. The snapshot is bound to the exact runtime epoch.
-        """
-        with self._lock:
-            return RuntimeSnapshot(
-                agent_id=self.agent_id,
-                epoch=self._epoch,
-                state=self.state,
-                can_execute=self.state is RuntimeState.ACTIVE,
-            )
 
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
