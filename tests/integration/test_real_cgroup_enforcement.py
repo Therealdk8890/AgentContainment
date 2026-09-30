@@ -87,3 +87,14 @@ def test_real_cgroup_kill_is_independently_observed_and_epoch_bound():
         assert observation.can_execute is False
         assert observation.verify_integrity()
         assert RuntimeObservationSource().matches(observation, runtime)
+    finally:
+        if workload is not None and workload.poll() is None:
+            workload.kill()
+            workload.wait(timeout=3)
+        if root_cgroup.exists():
+            try:
+                agent_cgroup = root_cgroup / "real-kill-agent"
+                if agent_cgroup.exists():
+                    supervisor.remove(agent_cgroup)
+            finally:
+                supervisor.remove(root_cgroup)
