@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from threading import RLock
 
+from .runtime import ExecutionLease, Runtime
+
 
 @dataclass(frozen=True)
 class CredentialLease:
@@ -10,13 +12,30 @@ class CredentialLease:
 
 @dataclass
 class CredentialStore:
-    """In-memory reference model for revocable credentials."""
+    """In-memory reference model for revocable, runtime-scoped credentials."""
 
     credentials: set[str] = field(default_factory=set)
+    runtime: Runtime | None = None
     _epochs: dict[str, int] = field(default_factory=dict, init=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def issue(self, credential_id: str) -> CredentialLease:
+        if self.runtime is not None:
+            # Keep the runtime fence lock held through credential-store
+            # mutation. This closes the issuance/containment interleave:
+            # containment cannot fence the runtime between the ACTIVE check and
+            # recording the newly issued authority.
+            def issue(runtime_lease):
+                with self._lock:
+                    self.credentials.add(credential_id)
+                    self._epochs[credential_id] = runtime_lease.epoch
+                    return CredentialLease(credential_id, runtime_lease.epoch)
+
+            lease = self.runtime.issue_if_active(issue)
+            if lease is None:
+                raise RuntimeError("credential issuance requires an active runtime")
+            return lease
+
         with self._lock:
             epoch = self._epochs.get(credential_id, 0)
             self.credentials.add(credential_id)
@@ -34,6 +53,10 @@ class CredentialStore:
             self.credentials.clear()
 
     def valid(self, lease: CredentialLease) -> bool:
+        if self.runtime is not None:
+            runtime_lease = ExecutionLease(self.runtime.agent_id, lease.epoch)
+            if not self.runtime.lease_valid(runtime_lease):
+                return False
         with self._lock:
             return (
                 lease.credential_id in self.credentials
@@ -42,6 +65,23 @@ class CredentialStore:
 
     def execute_if_valid(self, lease: CredentialLease, executor):
         """Atomically validate a lease and start its modeled side effect."""
+        if self.runtime is not None:
+            runtime_lease = ExecutionLease(self.runtime.agent_id, lease.epoch)
+
+            def guarded():
+                with self._lock:
+                    if not (
+                        lease.credential_id in self.credentials
+                        and lease.epoch == self._epochs.get(lease.credential_id, 0)
+                    ):
+                        return None
+                    return executor()
+
+            # Runtime.execute_if_active holds its state lock while invoking the
+            # guarded callback, so fencing cannot occur between validation and
+            # the modeled side effect.
+            return self.runtime.execute_if_active(runtime_lease, guarded)
+
         with self._lock:
             if not (
                 lease.credential_id in self.credentials

@@ -113,6 +113,18 @@ class Runtime:
                 return None
             return ExecutionLease(self.agent_id, self._epoch)
 
+    def issue_if_active(self, issuer: Callable[[ExecutionLease], T]) -> T | None:
+        """Run an authority-issuance callback under the runtime fence lock.
+
+        The callback may bind newly issued authority to the exact runtime
+        epoch. Containment/halt cannot interleave between the ACTIVE check and
+        the authority record being created.
+        """
+        with self._lock:
+            if self.state is not RuntimeState.ACTIVE:
+                return None
+            return issuer(ExecutionLease(self.agent_id, self._epoch))
+
     def lease_valid(self, lease: ExecutionLease) -> bool:
         with self._lock:
             return (
