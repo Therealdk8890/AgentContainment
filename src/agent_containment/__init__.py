@@ -15,6 +15,8 @@ from .provenance import InMemoryProvenanceSink, ProvenanceEmitter, ProvenanceRec
 from .regression import RegressionFixture, RegressionFixtureBuilder, assert_regression
 from .regression_replay import RegressionReplayResult, assert_fixture_replays, replay_fixture
 from .runtime_fence import FenceRecord, RuntimeFenceRegistry
+from .runtime_observation import RuntimeObservation, RuntimeObservationSource
+from .runtime import RuntimeSnapshot
 from .warden_observation import WardenObservation
 
 __all__ = [
@@ -27,6 +29,7 @@ __all__ = [
     "RegressionReplayResult", "replay_fixture", "assert_fixture_replays",
     "EgressController", "EgressLease", "PolicyEngine", "hard_close_socket",
     "LinuxCgroupSupervisor", "FenceRecord", "RuntimeFenceRegistry",
+    "RuntimeSnapshot", "RuntimeObservation", "RuntimeObservationSource",
     "ProofReceipt", "ReceiptVerifier",
     "Enforcer", "EnforcementResult", "EnforcementStatus", "NoopEnforcer",
     "CgroupV2Enforcer", "CiliumNetworkPolicyEnforcer", "WardenObservation",
