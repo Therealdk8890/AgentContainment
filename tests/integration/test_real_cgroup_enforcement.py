@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -9,11 +8,14 @@ import pytest
 from agent_containment.cgroup_enforcer import CgroupV2Enforcer
 from agent_containment.containment import ContainmentController
 from agent_containment.linux_supervisor import LinuxCgroupSupervisor
+from agent_containment.proof_receipt import ReceiptVerifier
 from agent_containment.runtime import Runtime
 from agent_containment.runtime_observation import RuntimeObservationSource
 
 
 pytestmark = pytest.mark.integration
+
+RECEIPT_SECRET = b"real-cgroup-integration-secret"
 
 
 def test_real_cgroup_kill_is_independently_observed_and_epoch_bound():
@@ -39,8 +41,6 @@ def test_real_cgroup_kill_is_independently_observed_and_epoch_bound():
         enforcer = CgroupV2Enforcer({agent_id: cgroup})
         controller = ContainmentController(runtime, enforcers=[enforcer])
 
-        # Ignore cooperative termination signals so the test exercises the
-        # external cgroup.kill boundary rather than a graceful shutdown path.
         workload_code = (
             "import signal, time; "
             "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
@@ -56,8 +56,6 @@ def test_real_cgroup_kill_is_independently_observed_and_epoch_bound():
 
         report = controller.contain()
 
-        # The workload is killed by the external enforcement boundary, not by
-        # the test process sending a signal to the workload.
         workload.wait(timeout=3)
         assert workload.returncode is not None
         assert workload.returncode < 0
@@ -70,26 +68,22 @@ def test_real_cgroup_kill_is_independently_observed_and_epoch_bound():
         assert "enforcer:cgroup-v2:verified" in report.stages
         assert report.failures == ()
 
-        # Independent post-kill observations come from the kernel-backed
-        # cgroup state and /proc, not from the controller's in-memory state.
+        receipt = report.to_receipt(
+            RECEIPT_SECRET,
+            execution_id=f"pid:{workload_pid}",
+            policy_id="real-cgroup-hard-stop",
+        )
+        assert receipt.payload["agent_id"] == agent_id
+        assert receipt.payload["epoch"] == report.epoch
+        assert receipt.payload["external_verified"] is True
+        assert receipt.payload["proof_status"] == "verified"
+        assert ReceiptVerifier(RECEIPT_SECRET).verify(receipt)
+
         assert not Path(f"/proc/{workload_pid}").exists()
         observation = RuntimeObservationSource().observe(runtime)
+        assert observation.agent_id == agent_id
         assert observation.epoch == report.epoch
         assert observation.state == "contained"
         assert observation.can_execute is False
         assert observation.verify_integrity()
         assert RuntimeObservationSource().matches(observation, runtime)
-    finally:
-        if workload is not None and workload.poll() is None:
-            workload.kill()
-            workload.wait(timeout=3)
-        if root_cgroup.exists():
-            for child in sorted(root_cgroup.iterdir(), reverse=True):
-                try:
-                    child.rmdir()
-                except OSError:
-                    pass
-            try:
-                root_cgroup.rmdir()
-            except OSError:
-                pass
