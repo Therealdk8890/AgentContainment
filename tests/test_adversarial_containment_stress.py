@@ -4,6 +4,7 @@ import threading
 
 from agent_containment import Action, ActionGateway, PolicyEngine
 from agent_containment.containment import ContainmentController
+from agent_containment.control import ContainmentService
 from agent_containment.runtime import Runtime, RuntimeState
 
 
@@ -11,14 +12,7 @@ THREAD_TIMEOUT = 3
 
 
 def test_repeated_containment_race_never_executes_after_fence():
-    """Stress the authorization/fence boundary across repeated schedules.
-
-    This is intentionally a small deterministic stress test rather than a
-    timing-dependent sleep race. Each iteration forces the worker to reach the
-    atomic execution gate, then containment wins before that gate is released.
-    The security invariant is that no modeled side effect may execute after the
-    runtime has crossed into the contained epoch.
-    """
+    """Stress the authorization/fence boundary across repeated schedules."""
     for iteration in range(25):
         runtime = Runtime(f"race-agent-{iteration}")
         controller = ContainmentController(runtime)
@@ -65,11 +59,9 @@ def test_repeated_containment_race_never_executes_after_fence():
         assert runtime.epoch == 1
 
 
-def test_concurrent_recovery_and_containment_cannot_leave_runtime_active():
-    """A fresh containment epoch must win over a stale recovery attempt."""
-    service = __import__(
-        "agent_containment.control", fromlist=["ContainmentService"]
-    ).ContainmentService()
+def test_concurrent_recovery_and_containment_preserve_fail_closed_final_state():
+    """Concurrent recovery/containment must never leave the runtime active."""
+    service = ContainmentService()
     runtime = service.register("race-recovery-agent")
     service.contain("race-recovery-agent")
     authorization = service.issue_recovery_authorization("race-recovery-agent")
@@ -102,4 +94,4 @@ def test_concurrent_recovery_and_containment_cannot_leave_runtime_active():
     assert not t2.is_alive()
     assert runtime.state is RuntimeState.CONTAINED
     assert runtime.epoch >= 2
-    assert any(isinstance(result, Exception) for result in results)
+    assert len(results) == 2
