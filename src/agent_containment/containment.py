@@ -30,6 +30,7 @@ class ContainmentReport:
     provider_applied_at: float | None = None
     independently_verified_at: float | None = None
     authority_revoked_at: str | None = None
+    enforcement_occurred_at: str | None = None
 
     @property
     def enforcement_latency_seconds(self) -> float | None:
@@ -66,6 +67,7 @@ class ContainmentReport:
             provider_applied_at=self.provider_applied_at,
             independently_verified_at=self.independently_verified_at,
             authority_revoked_at=self.authority_revoked_at,
+            enforcement_occurred_at=self.enforcement_occurred_at,
         )
     def authority_revocation_evidence_record(self, runtime_id: str) -> dict[str, object]:
         """Return canonical evidence that runtime authority was revoked at this epoch."""
@@ -92,6 +94,8 @@ class ContainmentReport:
             raise ValueError("action must be KILL or FENCE")
         if not self.external_verified or not self.certified or not self.durable:
             raise ValueError("external enforcement is not independently verified and durable")
+        if self.enforcement_occurred_at is None:
+            raise ValueError("external enforcement timestamp is unavailable")
         record = {
             "schema": "agent-containment/runtime-enforcement/v1",
             "runtime_id": runtime_id,
@@ -103,6 +107,7 @@ class ContainmentReport:
             "containment_requested_at": self.containment_requested_at,
             "provider_applied_at": self.provider_applied_at,
             "independently_verified_at": self.independently_verified_at,
+            "occurred_at": self.enforcement_occurred_at,
         }
         digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
         return {"record": record, "digest": "sha256:" + digest}
@@ -256,6 +261,7 @@ class ContainmentController:
                 failures.append(f"{provider}: {type(exc).__name__}: {exc}")
 
         independently_verified_at = monotonic() if verified_enforcers == len(self.enforcers) and self.enforcers else None
+        enforcement_occurred_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z") if independently_verified_at is not None else None
         report = ContainmentReport(
             agent_id=self.runtime.agent_id,
             epoch=self.runtime.epoch,
@@ -266,6 +272,7 @@ class ContainmentController:
             provider_applied_at=provider_applied_at,
             independently_verified_at=independently_verified_at,
             authority_revoked_at=authority_revoked_at,
+            enforcement_occurred_at=enforcement_occurred_at,
         )
         self.last_report = report
         return report
