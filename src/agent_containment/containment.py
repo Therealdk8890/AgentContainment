@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+import hashlib
+import json
 from time import monotonic
 import uuid
 from .credentials import CredentialStore
@@ -62,6 +64,29 @@ class ContainmentReport:
             provider_applied_at=self.provider_applied_at,
             independently_verified_at=self.independently_verified_at,
         )
+    def enforcement_evidence_record(self, runtime_id: str, *, action: str = "KILL") -> dict[str, object]:
+        """Return the canonical external-enforcement record for cross-system proof binding."""
+        if not runtime_id.strip():
+            raise ValueError("runtime_id must not be empty")
+        if action not in {"KILL", "FENCE"}:
+            raise ValueError("action must be KILL or FENCE")
+        if not self.external_verified or not self.certified or not self.durable:
+            raise ValueError("external enforcement is not independently verified and durable")
+        record = {
+            "schema": "agent-containment/runtime-enforcement/v1",
+            "runtime_id": runtime_id,
+            "agent_id": self.agent_id,
+            "epoch": self.epoch,
+            "action": action,
+            "external_boundary": True,
+            "stages": list(self.stages),
+            "containment_requested_at": self.containment_requested_at,
+            "provider_applied_at": self.provider_applied_at,
+            "independently_verified_at": self.independently_verified_at,
+        }
+        digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        return {"record": record, "digest": "sha256:" + digest}
+
     def to_receipt(
         self,
         secret: bytes,
