@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from time import monotonic
+from datetime import datetime, timezone
 import uuid
 from .credentials import CredentialStore
 from .enforcer import Enforcer, EnforcementStatus
@@ -28,6 +29,7 @@ class ContainmentReport:
     containment_requested_at: float | None = None
     provider_applied_at: float | None = None
     independently_verified_at: float | None = None
+    authority_revoked_at: str | None = None
 
     @property
     def enforcement_latency_seconds(self) -> float | None:
@@ -63,7 +65,25 @@ class ContainmentReport:
             containment_requested_at=self.containment_requested_at,
             provider_applied_at=self.provider_applied_at,
             independently_verified_at=self.independently_verified_at,
+            authority_revoked_at=self.authority_revoked_at,
         )
+    def authority_revocation_evidence_record(self, runtime_id: str) -> dict[str, object]:
+        """Return canonical evidence that runtime authority was revoked at this epoch."""
+        if not runtime_id.strip():
+            raise ValueError("runtime_id must not be empty")
+        if self.authority_revoked_at is None:
+            raise ValueError("authority revocation timestamp is unavailable")
+        record = {
+            "schema": "agent-containment/runtime-authority-revocation/v1",
+            "runtime_id": runtime_id,
+            "agent_id": self.agent_id,
+            "epoch": self.epoch,
+            "revoked": True,
+            "revoked_at": self.authority_revoked_at,
+        }
+        digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        return {"record": record, "digest": "sha256:" + digest, "revoked": True, "revoked_at": self.authority_revoked_at, "runtime_id": runtime_id, "agent_id": self.agent_id, "epoch": self.epoch}
+
     def enforcement_evidence_record(self, runtime_id: str, *, action: str = "KILL") -> dict[str, object]:
         """Return the canonical external-enforcement record for cross-system proof binding."""
         if not runtime_id.strip():
@@ -180,6 +200,7 @@ class ContainmentController:
         # egress, and credential leases are stale even if later enforcement
         # stages fail.
         self.runtime.contain()
+        authority_revoked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         stages: list[str] = ["runtime_fenced"]
         failures: list[str] = []
         self.capabilities.revoke_all()
@@ -244,6 +265,7 @@ class ContainmentController:
             containment_requested_at=containment_requested_at,
             provider_applied_at=provider_applied_at,
             independently_verified_at=independently_verified_at,
+            authority_revoked_at=authority_revoked_at,
         )
         self.last_report = report
         return report
