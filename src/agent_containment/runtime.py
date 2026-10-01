@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from threading import RLock
+import uuid
 from typing import Callable, TypeVar
 
 
@@ -21,6 +22,7 @@ class ExecutionLease:
 class RuntimeSnapshot:
     """Atomic controller-runtime observation bound to one execution epoch."""
 
+    runtime_id: str
     agent_id: str
     epoch: int
     state: RuntimeState
@@ -37,8 +39,9 @@ T = TypeVar("T")
 class Runtime:
     """Runtime state with an epoch that invalidates outstanding execution leases."""
 
-    def __init__(self, agent_id: str):
+    def __init__(self, agent_id: str, runtime_id: str | None = None):
         self.agent_id = agent_id
+        self.runtime_id = runtime_id or str(uuid.uuid4())
         self.state = RuntimeState.ACTIVE
         self._epoch = 0
         self._lock = RLock()
@@ -125,6 +128,7 @@ class Runtime:
         """
         with self._lock:
             return RuntimeSnapshot(
+                runtime_id=self.runtime_id,
                 agent_id=self.agent_id,
                 epoch=self._epoch,
                 state=self.state,

@@ -62,6 +62,7 @@ def test_tampered_runtime_observation_is_rejected():
 
     tampered = type(observation)(
         schema=payload["schema"],
+        runtime_id=payload["runtime_id"],
         agent_id=payload["agent_id"],
         epoch=payload["epoch"],
         state=payload["state"],

@@ -26,6 +26,7 @@ def _canonical(payload: dict[str, object]) -> bytes:
 @dataclass(frozen=True)
 class RuntimeObservation:
     schema: str
+    runtime_id: str
     agent_id: str
     epoch: int
     state: str
@@ -36,6 +37,7 @@ class RuntimeObservation:
     def payload(self) -> dict[str, object]:
         return {
             "schema": self.schema,
+            "runtime_id": self.runtime_id,
             "agent_id": self.agent_id,
             "epoch": self.epoch,
             "state": self.state,
@@ -67,6 +69,7 @@ class RuntimeObservationSource:
     ) -> RuntimeObservation:
         observation = RuntimeObservation(
             schema=self.SCHEMA,
+            runtime_id=snapshot.runtime_id,
             agent_id=snapshot.agent_id,
             epoch=snapshot.epoch,
             state=snapshot.state.value,
@@ -77,6 +80,7 @@ class RuntimeObservationSource:
         digest = hashlib.sha256(_canonical(observation.payload())).hexdigest()
         return RuntimeObservation(
             schema=observation.schema,
+            runtime_id=observation.runtime_id,
             agent_id=observation.agent_id,
             epoch=observation.epoch,
             state=observation.state,
@@ -96,6 +100,7 @@ class RuntimeObservationSource:
         current = runtime.snapshot()
         return (
             observation.schema == self.SCHEMA
+            and observation.runtime_id == current.runtime_id
             and observation.agent_id == current.agent_id
             and observation.epoch == current.epoch
             and observation.state == current.state.value
