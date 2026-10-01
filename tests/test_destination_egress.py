@@ -4,7 +4,6 @@ import pytest
 
 from agent_containment.destination_egress import (
     canonical_destination_strings,
-    canonicalize_destinations,
     parse_destination,
 )
 
@@ -12,18 +11,15 @@ from agent_containment.destination_egress import (
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("api.EXAMPLE.com:443", "api.example.com:443"),
-        ("api.example.com.:443", "api.example.com:443"),
-        ("192.0.2.10:443", "192.0.2.10:443"),
-        ("2001:db8::10", "2001:db8::10"),
+        ("api.EXAMPLE.com:443", ("api.example.com", 443)),
+        ("api.example.com.:443", ("api.example.com", 443)),
+        ("192.0.2.10:443", ("192.0.2.10", 443)),
+        ("[2001:0DB8::10]:443", ("2001:db8::10", 443)),
     ],
 )
 def test_parse_destination(value, expected):
-    if ":" not in value or value.count(":") > 1:
-        if value == "2001:db8::10":
-            pytest.raises(ValueError, parse_destination, value)
-            return
-    assert parse_destination(value).host == expected.split(":")[0]
+    destination = parse_destination(value)
+    assert (destination.host, destination.port) == expected
 
 
 def test_ipv6_requires_brackets():
@@ -32,7 +28,9 @@ def test_ipv6_requires_brackets():
 
 
 def test_ipv6_canonicalization():
-    assert canonical_destination_strings(["[2001:0DB8::10]:443"]) == ("[2001:db8::10]:443",)
+    assert canonical_destination_strings(["[2001:0DB8::10]:443"]) == (
+        "[2001:db8::10]:443",
+    )
 
 
 def test_canonicalize_deduplicates_and_sorts():
