@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import ipaddress
 import re
 from typing import Iterable
-from urllib.parse import urlsplit
 
 _HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
@@ -61,7 +60,7 @@ def parse_destination(value: str) -> Destination:
         host = str(ipaddress.ip_address(host_text))
     except ValueError:
         host = host_text.rstrip(".").lower()
-        if not _HOSTNAME_RE.fullmatch(host) or "." not in host:
+        if not _HOSTNAME_RE.fullmatch(host):
             raise ValueError("destination host must be a DNS hostname or IP address")
         if host.startswith(".") or host.endswith("."):
             raise ValueError("destination hostname is invalid")
