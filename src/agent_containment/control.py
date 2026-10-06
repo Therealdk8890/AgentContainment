@@ -433,6 +433,10 @@ class ContainmentService:
     def status(self, agent_id: str) -> RuntimeState:
         return self._managed(agent_id).runtime.state
 
+    def runtime_snapshot(self, agent_id: str):
+        """Return a controller-owned snapshot for external integration boundaries."""
+        return self._managed(agent_id).runtime.snapshot()
+
     def contain(self, agent_id: str) -> ContainmentReport:
         # Serialize containment with recovery so no recovery authorization can
         # race a new containment event between the runtime fence and incident
