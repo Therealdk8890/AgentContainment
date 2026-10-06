@@ -252,3 +252,22 @@ def test_authorization_is_fenced_against_concurrent_containment():
     assert not authorize_thread.is_alive()
     assert result["decision"].decision is DecisionType.DENY
     assert result["decision"].reason == "agent identity is no longer authorized"
+
+
+def test_runtime_snapshot_exposes_controller_owned_identity_and_epoch():
+    service = ContainmentService()
+    runtime = service.register("agent-snapshot")
+
+    before = service.runtime_snapshot("agent-snapshot")
+    assert before.runtime_id == runtime.runtime_id
+    assert before.agent_id == "agent-snapshot"
+    assert before.epoch == 0
+    assert before.state is RuntimeState.ACTIVE
+
+    service.contain("agent-snapshot")
+
+    after = service.runtime_snapshot("agent-snapshot")
+    assert after.runtime_id == runtime.runtime_id
+    assert after.epoch == 1
+    assert after.state is RuntimeState.CONTAINED
+    assert not after.can_execute
