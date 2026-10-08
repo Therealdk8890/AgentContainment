@@ -54,14 +54,17 @@ class PolicyEngine:
             return Decision(action.action_id, DecisionType.HALT,
                             f"risk {action.risk} exceeds threshold {self.max_risk}")
 
-        candidate = tuple(self.history) + (action.operation,)
-        for rule in self.sequence_rules:
-            if len(candidate) >= len(rule.sequence) and candidate[-len(rule.sequence):] == rule.sequence:
-                return Decision(
-                    action.action_id,
-                    rule.decision,
-                    f"sequence rule '{rule.name}' matched",
-                )
+        # Most policies use only per-action rules. Avoid copying the entire
+        # history deque on every action when no sequence rules are configured.
+        if self.sequence_rules:
+            candidate = tuple(self.history) + (action.operation,)
+            for rule in self.sequence_rules:
+                if len(candidate) >= len(rule.sequence) and candidate[-len(rule.sequence):] == rule.sequence:
+                    return Decision(
+                        action.action_id,
+                        rule.decision,
+                        f"sequence rule '{rule.name}' matched",
+                    )
 
         self.history.append(action.operation)
         return Decision(action.action_id, DecisionType.ALLOW, "within policy")
