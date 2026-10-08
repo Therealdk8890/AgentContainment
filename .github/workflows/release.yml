@@ -40,9 +40,44 @@ jobs:
           name: agentcontainment-${{ github.ref_name }}
           path: dist/
 
+  check-pypi:
+    name: Check PyPI publication state
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.check.outputs.published }}
+    steps:
+      - name: Check whether this version is already on PyPI
+        id: check
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+
+          version = os.environ["VERSION"].removeprefix("v")
+          url = f"https://pypi.org/pypi/agentcontainment/{version}/json"
+
+          try:
+              with urllib.request.urlopen(url, timeout=10) as response:
+                  published = response.status == 200
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  published = False
+              else:
+                  raise
+
+          print(f"PyPI version {version}: {'already published' if published else 'not published'}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"published={'true' if published else 'false'}\n")
+          PY
+
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: check-pypi
+    if: needs.check-pypi.outputs.published != 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -55,3 +90,12 @@ jobs:
 
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  already-published:
+    name: PyPI already contains this version
+    needs: check-pypi
+    if: needs.check-pypi.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record successful idempotent release
+        run: echo "agentcontainment ${{ github.ref_name }} is already published on PyPI; nothing to upload."
