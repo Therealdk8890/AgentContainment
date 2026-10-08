@@ -1,3 +1,5 @@
+from collections import deque
+
 from .containment import ContainmentController
 from .egress import EgressController, EgressLease
 from .models import Action, Decision, DecisionType
@@ -8,12 +10,23 @@ from .runtime import ExecutionLease
 class ActionGateway:
     """The enforcement point between an agent and its tools."""
 
-    def __init__(self, policy: PolicyEngine, containment: ContainmentController):
+    def __init__(
+        self,
+        policy: PolicyEngine,
+        containment: ContainmentController,
+        history_limit: int | None = None,
+    ):
+        if history_limit is not None and history_limit < 1:
+            raise ValueError("history_limit must be positive or None")
         self.policy = policy
         self.containment = containment
         self.egress = EgressController(containment.runtime)
         self.containment.attach_egress(self.egress)
-        self.history: list[Decision] = []
+        # Preserve the complete decision trail by default; deployments that
+        # only need recent diagnostics can opt into bounded retention.
+        self.history: list[Decision] | deque[Decision] = (
+            [] if history_limit is None else deque(maxlen=history_limit)
+        )
 
     def authorize(self, action: Action) -> Decision:
         if not self.containment.runtime.can_execute:
