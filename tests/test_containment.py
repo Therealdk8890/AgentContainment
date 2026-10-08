@@ -1,3 +1,5 @@
+import pytest
+
 from agent_containment import Action, ActionGateway, PolicyEngine
 from agent_containment.containment import CapabilitySet, ContainmentController
 from agent_containment.runtime import Runtime, RuntimeState
@@ -65,3 +67,22 @@ def test_containment_stays_fenced_when_kernel_enforcement_fails():
     assert not report.complete
     assert report.failures[0].startswith("kernel_egress_contained: RuntimeError:")
     assert "processes_contained" in report.stages
+
+
+def test_gateway_decision_history_is_bounded():
+    runtime = Runtime("agent-history")
+    controller = ContainmentController(runtime)
+    gateway = ActionGateway(PolicyEngine(), controller, history_limit=3)
+
+    for index in range(10):
+        gateway.authorize(Action("agent-history", str(index), "read", "resource"))
+
+    assert len(gateway.history) == 3
+    assert [item.action_id for item in gateway.history] == ["7", "8", "9"]
+
+
+def test_gateway_rejects_nonpositive_history_limit():
+    runtime = Runtime("agent-history-invalid")
+    controller = ContainmentController(runtime)
+    with pytest.raises(ValueError, match="history_limit must be positive or None"):
+        ActionGateway(PolicyEngine(), controller, history_limit=0)
