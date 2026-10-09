@@ -1,5 +1,4 @@
 import threading
-import time
 
 from agent_containment import Action, ActionGateway, PolicyEngine
 from agent_containment.containment import ContainmentController
@@ -84,23 +83,38 @@ def test_new_lease_cannot_be_acquired_after_halt():
 
 
 
-def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
-    """Halt must not slip between lease validation and side-effect invocation.
 
-    The in-flight callback is deliberately blocked. The halt request must wait
-    for the atomic execution section to finish; once halt returns, the old
-    lease must not be able to start another side effect.
-    """
+def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
+    """Halt cannot interleave with the atomic lease-check-and-start boundary."""
     runtime = Runtime("agent-halt-inflight-boundary")
     lease = runtime.acquire_lease()
     assert lease is not None
 
     executor_started = threading.Event()
     release_executor = threading.Event()
-    halt_requested = threading.Event()
+    halt_lock_attempted = threading.Event()
     halt_completed = threading.Event()
     effects = []
-    halt_elapsed = []
+
+    class ObservedLock:
+        """Signal when the halt thread attempts the runtime lock, before blocking."""
+
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __enter__(self):
+            if threading.current_thread().name == "halt-under-test":
+                halt_lock_attempted.set()
+            self._wrapped.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self._wrapped.release()
+            return False
+
+    # Instrument the existing lock so the test knows halt has actually reached
+    # the lock boundary, rather than relying on a sleep or scheduler timing.
+    runtime._lock = ObservedLock(runtime._lock)
 
     def blocking_side_effect():
         effects.append("in-flight-started")
@@ -109,26 +123,24 @@ def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
         effects.append("in-flight-completed")
         return "completed"
 
-    def execute():
-        return runtime.execute_if_active(lease, blocking_side_effect)
-
-    def halt():
-        halt_requested.set()
-        started_at = time.perf_counter()
-        runtime.halt()
-        halt_elapsed.append(time.perf_counter() - started_at)
-        halt_completed.set()
-
-    worker = threading.Thread(target=execute, daemon=True)
+    worker = threading.Thread(
+        target=lambda: runtime.execute_if_active(lease, blocking_side_effect),
+        name="blocked-executor",
+        daemon=True,
+    )
     worker.start()
     assert executor_started.wait(THREAD_TIMEOUT), "side effect did not start"
 
-    halter = threading.Thread(target=halt, daemon=True)
+    halter = threading.Thread(
+        target=lambda: (runtime.halt(), halt_completed.set()),
+        name="halt-under-test",
+        daemon=True,
+    )
     halter.start()
-    assert halt_requested.wait(THREAD_TIMEOUT), "halt thread did not start"
+    assert halt_lock_attempted.wait(THREAD_TIMEOUT), "halt did not attempt the runtime lock"
 
-    # While the executor holds the runtime fence, halt cannot complete.
-    assert not halt_completed.wait(0.05), "halt completed inside the in-flight execution section"
+    # Halt has reached the lock and must remain blocked while the callback holds it.
+    assert not halt_completed.is_set(), "halt completed inside the in-flight execution section"
 
     release_executor.set()
     worker.join(timeout=THREAD_TIMEOUT)
@@ -137,7 +149,6 @@ def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
     assert not worker.is_alive(), "executor thread did not finish"
     assert not halter.is_alive(), "halt thread did not finish"
     assert halt_completed.is_set()
-    assert halt_elapsed and halt_elapsed[0] >= 0
     assert effects == ["in-flight-started", "in-flight-completed"]
     assert runtime.state is RuntimeState.HALTED
     assert runtime.execute_if_active(lease, lambda: effects.append("stale-side-effect")) is None
