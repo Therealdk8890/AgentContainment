@@ -1,4 +1,5 @@
 import threading
+import time
 
 from agent_containment import Action, ActionGateway, PolicyEngine
 from agent_containment.containment import ContainmentController
@@ -80,3 +81,64 @@ def test_new_lease_cannot_be_acquired_after_halt():
     runtime.halt()
 
     assert runtime.acquire_lease() is None
+
+
+
+def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
+    """Halt must not slip between lease validation and side-effect invocation.
+
+    The in-flight callback is deliberately blocked. The halt request must wait
+    for the atomic execution section to finish; once halt returns, the old
+    lease must not be able to start another side effect.
+    """
+    runtime = Runtime("agent-halt-inflight-boundary")
+    lease = runtime.acquire_lease()
+    assert lease is not None
+
+    executor_started = threading.Event()
+    release_executor = threading.Event()
+    halt_requested = threading.Event()
+    halt_completed = threading.Event()
+    effects = []
+    halt_elapsed = []
+
+    def blocking_side_effect():
+        effects.append("in-flight-started")
+        executor_started.set()
+        assert release_executor.wait(THREAD_TIMEOUT), "test did not release blocked side effect"
+        effects.append("in-flight-completed")
+        return "completed"
+
+    def execute():
+        return runtime.execute_if_active(lease, blocking_side_effect)
+
+    def halt():
+        halt_requested.set()
+        started_at = time.perf_counter()
+        runtime.halt()
+        halt_elapsed.append(time.perf_counter() - started_at)
+        halt_completed.set()
+
+    worker = threading.Thread(target=execute, daemon=True)
+    worker.start()
+    assert executor_started.wait(THREAD_TIMEOUT), "side effect did not start"
+
+    halter = threading.Thread(target=halt, daemon=True)
+    halter.start()
+    assert halt_requested.wait(THREAD_TIMEOUT), "halt thread did not start"
+
+    # While the executor holds the runtime fence, halt cannot complete.
+    assert not halt_completed.wait(0.05), "halt completed inside the in-flight execution section"
+
+    release_executor.set()
+    worker.join(timeout=THREAD_TIMEOUT)
+    halter.join(timeout=THREAD_TIMEOUT)
+
+    assert not worker.is_alive(), "executor thread did not finish"
+    assert not halter.is_alive(), "halt thread did not finish"
+    assert halt_completed.is_set()
+    assert halt_elapsed and halt_elapsed[0] >= 0
+    assert effects == ["in-flight-started", "in-flight-completed"]
+    assert runtime.state is RuntimeState.HALTED
+    assert runtime.execute_if_active(lease, lambda: effects.append("stale-side-effect")) is None
+    assert effects == ["in-flight-started", "in-flight-completed"]
