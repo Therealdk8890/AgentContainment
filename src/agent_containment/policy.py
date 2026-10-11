@@ -9,11 +9,16 @@ from .models import Action, Decision, DecisionType
 
 @dataclass(frozen=True)
 class SequenceRule:
-    """A forbidden ordered sequence of operation names."""
+    """A forbidden ordered sequence of operation names.
+
+    By default, matching operations may have unrelated actions between them.
+    Set ``consecutive=True`` only when adjacency is the intended policy.
+    """
 
     name: str
     sequence: tuple[str, ...]
     decision: DecisionType = DecisionType.HALT
+    consecutive: bool = False
 
     def __post_init__(self) -> None:
         if not self.name or not self.sequence:
@@ -59,7 +64,24 @@ class PolicyEngine:
         if self.sequence_rules:
             candidate = tuple(self.history) + (action.operation,)
             for rule in self.sequence_rules:
-                if len(candidate) >= len(rule.sequence) and candidate[-len(rule.sequence):] == rule.sequence:
+                matched = False
+                if rule.consecutive:
+                    matched = (
+                        len(candidate) >= len(rule.sequence)
+                        and candidate[-len(rule.sequence):] == rule.sequence
+                    )
+                else:
+                    # Match as an ordered subsequence: an unrelated allowed
+                    # action must not reset a security-relevant chain.
+                    expected = iter(rule.sequence)
+                    next_expected = next(expected, None)
+                    for operation in candidate:
+                        if operation == next_expected:
+                            next_expected = next(expected, None)
+                            if next_expected is None:
+                                matched = True
+                                break
+                if matched:
                     return Decision(
                         action.action_id,
                         rule.decision,
