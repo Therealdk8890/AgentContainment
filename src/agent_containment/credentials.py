@@ -8,6 +8,7 @@ from .runtime import ExecutionLease, Runtime
 class CredentialLease:
     credential_id: str
     epoch: int
+    _proof: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -29,7 +30,9 @@ class CredentialStore:
                 with self._lock:
                     self.credentials.add(credential_id)
                     self._epochs[credential_id] = runtime_lease.epoch
-                    return CredentialLease(credential_id, runtime_lease.epoch)
+                    return CredentialLease(
+                        credential_id, runtime_lease.epoch, runtime_lease._proof
+                    )
 
             lease = self.runtime.issue_if_active(issue)
             if lease is None:
@@ -54,7 +57,9 @@ class CredentialStore:
 
     def valid(self, lease: CredentialLease) -> bool:
         if self.runtime is not None:
-            runtime_lease = ExecutionLease(self.runtime.agent_id, lease.epoch)
+            runtime_lease = ExecutionLease(
+                self.runtime.agent_id, lease.epoch, lease._proof
+            )
             if not self.runtime.lease_valid(runtime_lease):
                 return False
         with self._lock:
@@ -66,7 +71,9 @@ class CredentialStore:
     def execute_if_valid(self, lease: CredentialLease, executor):
         """Atomically validate a lease and start its modeled side effect."""
         if self.runtime is not None:
-            runtime_lease = ExecutionLease(self.runtime.agent_id, lease.epoch)
+            runtime_lease = ExecutionLease(
+                self.runtime.agent_id, lease.epoch, lease._proof
+            )
 
             def guarded():
                 with self._lock:

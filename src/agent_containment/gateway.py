@@ -29,7 +29,10 @@ class ActionGateway:
         )
 
     def authorize(self, action: Action) -> Decision:
-        if not self.containment.runtime.can_execute:
+        if action.agent_id != self.containment.runtime.agent_id:
+            decision = Decision(action.action_id, DecisionType.DENY,
+                                "action agent_id does not match runtime")
+        elif not self.containment.runtime.can_execute:
             decision = Decision(action.action_id, DecisionType.DENY, "agent runtime is not executable")
         else:
             decision = self.policy.evaluate(action)
@@ -42,6 +45,11 @@ class ActionGateway:
         return self.containment.runtime.acquire_lease()
 
     def execute_with_lease(self, action: Action, lease: ExecutionLease, executor):
+        if action.agent_id != self.containment.runtime.agent_id:
+            decision = Decision(action.action_id, DecisionType.DENY,
+                                "action agent_id does not match runtime")
+            self.history.append(decision)
+            return decision
         if not self.containment.runtime.lease_valid(lease):
             decision = Decision(action.action_id, DecisionType.DENY,
                                 "execution lease invalidated by runtime state change")
@@ -70,6 +78,9 @@ class ActionGateway:
         return self.egress.acquire_lease()
 
     def execute_egress(self, action: Action, lease: EgressLease, executor):
+        if action.agent_id != self.containment.runtime.agent_id:
+            return Decision(action.action_id, DecisionType.DENY,
+                            "action agent_id does not match runtime")
         if not self.egress.authorize(lease):
             return Decision(action.action_id, DecisionType.DENY,
                             "egress lease invalidated by runtime state change")
@@ -78,7 +89,7 @@ class ActionGateway:
         if decision.decision is not DecisionType.ALLOW:
             return decision
 
-        execution_lease = ExecutionLease(lease.agent_id, lease.epoch)
+        execution_lease = ExecutionLease(lease.agent_id, lease.epoch, lease._proof)
         sentinel = object()
         result = self.containment.runtime.execute_if_active(
             execution_lease,
@@ -92,6 +103,11 @@ class ActionGateway:
         return result[1]
 
     def execute(self, action: Action, executor):
+        if action.agent_id != self.containment.runtime.agent_id:
+            decision = Decision(action.action_id, DecisionType.DENY,
+                                "action agent_id does not match runtime")
+            self.history.append(decision)
+            return decision
         lease = self.acquire_lease()
         if lease is None:
             return self.authorize(action)
