@@ -45,6 +45,32 @@ def test_stale_execution_lease_cannot_cross_containment_or_recovery():
     record_proof("stale_execution_lease")
 
 
+def test_contained_runtime_state_is_read_only_and_recovery_is_authorized():
+    """Callers cannot reactivate a contained runtime through the public state API."""
+    runtime = Runtime("agent-readonly-state")
+    runtime.contain()
+
+    try:
+        runtime.state = RuntimeState.ACTIVE
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("runtime state unexpectedly allowed public assignment")
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.acquire_lease() is None
+
+    try:
+        runtime.recover(object(), expected_epoch=runtime.epoch)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("untrusted recovery capability was accepted")
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.acquire_lease() is None
+
+
 def test_stale_lease_cannot_execute_during_containment_transition():
     """The atomic execution gate must reject a lease once fencing wins the lock."""
     runtime = Runtime("agent-2")
