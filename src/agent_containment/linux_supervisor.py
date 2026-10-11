@@ -95,13 +95,16 @@ class LinuxCgroupSupervisor:
     def is_populated(cgroup_path: str | os.PathLike[str]) -> bool:
         events = Path(cgroup_path) / "cgroup.events"
         if not events.is_file():
-            return False
+            raise RuntimeError(f"cgroup.events is unavailable: {events}")
         values = {}
-        for line in events.read_text().splitlines():
-            key, _, value = line.partition(" ")
-            if key:
+        for line in events.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(" ")
+            if separator and key:
                 values[key] = value.strip()
-        return values.get("populated") == "1"
+        populated = values.get("populated")
+        if populated not in {"0", "1"}:
+            raise RuntimeError(f"cgroup.events has no valid populated field: {events}")
+        return populated == "1"
 
     @staticmethod
     def contain(cgroup_path: str | os.PathLike[str]) -> int:
