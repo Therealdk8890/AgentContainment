@@ -411,21 +411,17 @@ Before production use, validate at minimum:
 
 AgentContainment does **not** claim that completed external side effects can be undone.
 
-## Project maturity and continuity
+## Project maturity and operational readiness
 
-AgentContainment is a **0.1.0 research/prototype release maintained by a solo project owner**. That matters for anyone evaluating it as security infrastructure.
+AgentContainment is an early-stage security infrastructure project, currently in the 0.1.x release series. Its focus is on verifiable runtime containment, explicit authority boundaries, and evidence that can be independently inspected.
 
-There is currently no claim of:
+The project is evolving through implementation, testing, and reproducible security validation. As with any early-stage security technology, production adoption should be based on the capabilities that have been demonstrated and validated in the target environment.
 
-- an enterprise support organization;
-- a guaranteed SLA;
-- a multi-maintainer succession plan;
-- managed fleet availability;
-- vendor-operated incident response.
+At this stage, the project does not offer enterprise support contracts, guaranteed SLAs, managed fleet operations, or vendor-operated incident response. These are separate operational commitments, not claims implied by the open-source release.
 
-The practical mitigation is to treat the repository as inspectable infrastructure rather than a hosted trust service: pin the version or commit you deploy, run the privileged validation against your own kernel/runtime configuration, retain your own evidence, and maintain an internal fork or mirror if operational continuity is required.
+For evaluation and deployment, organizations should pin the version or commit they validate, run the relevant privileged integration tests against their own kernel and runtime configuration, and retain the evidence needed for their own verification and audit processes.
 
-The Apache-2.0 license permits organizations to fork and continue the codebase. The project should earn production trust through reproducible evidence, review, and operational ownership — not through an assumption that the maintainer will always be available.
+**The objective is to earn production trust through demonstrable enforcement, reproducible evidence, and independent verification.** The project's capabilities and maturity will be established by what can be tested and verified—not by unsupported guarantees.
 
 ## Tests
 
