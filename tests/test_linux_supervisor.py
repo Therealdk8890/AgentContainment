@@ -22,5 +22,15 @@ def test_is_populated_parses_cgroup_events(tmp_path):
     (tmp_path / "cgroup.events").write_text("populated 1\nfrozen 0\n")
     assert LinuxCgroupSupervisor.is_populated(tmp_path)
 
-def test_is_populated_empty_for_missing_events(tmp_path):
+def test_is_populated_fails_closed_for_missing_events(tmp_path):
+    with pytest.raises(RuntimeError, match="cgroup.events is unavailable"):
+        LinuxCgroupSupervisor.is_populated(tmp_path)
+
+def test_is_populated_fails_closed_for_missing_populated_field(tmp_path):
+    (tmp_path / "cgroup.events").write_text("frozen 0\\n")
+    with pytest.raises(RuntimeError, match="no valid populated field"):
+        LinuxCgroupSupervisor.is_populated(tmp_path)
+
+def test_is_populated_returns_false_only_for_explicit_zero(tmp_path):
+    (tmp_path / "cgroup.events").write_text("populated 0\\nfrozen 0\\n")
     assert not LinuxCgroupSupervisor.is_populated(tmp_path)
