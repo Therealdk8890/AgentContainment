@@ -133,3 +133,23 @@ def test_unleased_gateway_execution_is_fenced_before_side_effect():
     assert not worker.is_alive()
     assert runtime.state is RuntimeState.CONTAINED
     assert executed == []
+
+
+def test_caller_constructed_execution_lease_cannot_authorize_side_effect():
+    """A matching agent/epoch tuple is not proof of runtime-issued authority."""
+    runtime, _controller, gateway = make_gateway()
+    from agent_containment.runtime import ExecutionLease
+
+    forged = ExecutionLease(agent_id="agent-1", epoch=runtime.epoch)
+    executed = []
+
+    result = gateway.execute_with_lease(
+        Action("agent-1", "forged-lease", "write", "resource"),
+        forged,
+        lambda action: executed.append("SIDE EFFECT"),
+    )
+
+    assert getattr(result, "decision", None) is not None
+    assert result.decision.value == "deny"
+    assert "invalidated" in result.reason
+    assert executed == []
