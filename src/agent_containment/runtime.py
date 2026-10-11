@@ -42,19 +42,31 @@ class Runtime:
     def __init__(self, agent_id: str, runtime_id: str | None = None):
         self.agent_id = agent_id
         self.runtime_id = runtime_id or str(uuid.uuid4())
-        self.state = RuntimeState.ACTIVE
+        self._state = RuntimeState.ACTIVE
         self._epoch = 0
         self._lock = RLock()
         self._recovery_capability = _RecoveryCapability()
 
+    @property
+    def state(self) -> RuntimeState:
+        """Expose lifecycle state as read-only API, not as a mutation interface.
+
+        This prevents accidental direct assignment by callers. It is not a
+        security boundary against hostile code in this Python process: the
+        controller and its Runtime object must remain outside the agent's
+        process/privilege trust boundary.
+        """
+        with self._lock:
+            return self._state
+
     def halt(self) -> None:
         with self._lock:
-            self.state = RuntimeState.HALTED
+            self._state = RuntimeState.HALTED
             self._epoch += 1
 
     def contain(self) -> None:
         with self._lock:
-            self.state = RuntimeState.CONTAINED
+            self._state = RuntimeState.CONTAINED
             self._epoch += 1
 
     def restore_contained(self, epoch: int) -> None:
@@ -67,18 +79,18 @@ class Runtime:
         if epoch < 0:
             raise ValueError("epoch must be non-negative")
         with self._lock:
-            if self.state is RuntimeState.ACTIVE:
-                self.state = RuntimeState.CONTAINED
+            if self._state is RuntimeState.ACTIVE:
+                self._state = RuntimeState.CONTAINED
                 self._epoch = epoch
                 return
-            if self.state is RuntimeState.CONTAINED:
+            if self._state is RuntimeState.CONTAINED:
                 if self._epoch != epoch:
                     raise ValueError(
                         f"contained runtime epoch mismatch: {self._epoch} != {epoch}"
                     )
                 return
             raise ValueError(
-                f"cannot restore contained state from runtime state {self.state.value}"
+                f"cannot restore contained state from runtime state {self._state.value}"
             )
 
     def _rotate_recovery_capability(self) -> _RecoveryCapability:
@@ -99,16 +111,16 @@ class Runtime:
         if capability is not self._recovery_capability:
             raise PermissionError("recovery requires current controller authorization")
         with self._lock:
-            if self.state is not RuntimeState.CONTAINED:
+            if self._state is not RuntimeState.CONTAINED:
                 raise RuntimeError(
-                    f"runtime is not contained: {self.state.value}"
+                    f"runtime is not contained: {self._state.value}"
                 )
             if self._epoch != expected_epoch:
                 raise RuntimeError(
                     f"contained runtime epoch mismatch: {self._epoch} != {expected_epoch}"
                 )
             self._epoch += 1
-            self.state = RuntimeState.ACTIVE
+            self._state = RuntimeState.ACTIVE
             return self._epoch
 
     def _restore_active(self, epoch: int) -> None:
@@ -116,7 +128,7 @@ class Runtime:
         if epoch < 0:
             raise ValueError("epoch must be non-negative")
         with self._lock:
-            self.state = RuntimeState.ACTIVE
+            self._state = RuntimeState.ACTIVE
             self._epoch = epoch
 
     def snapshot(self) -> RuntimeSnapshot:
@@ -131,13 +143,13 @@ class Runtime:
                 runtime_id=self.runtime_id,
                 agent_id=self.agent_id,
                 epoch=self._epoch,
-                state=self.state,
+                state=self._state,
                 can_execute=self.state is RuntimeState.ACTIVE,
             )
 
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
-            if self.state is not RuntimeState.ACTIVE:
+            if self._state is not RuntimeState.ACTIVE:
                 return None
             return ExecutionLease(self.agent_id, self._epoch)
 
@@ -149,7 +161,7 @@ class Runtime:
         the authority record being created.
         """
         with self._lock:
-            if self.state is not RuntimeState.ACTIVE:
+            if self._state is not RuntimeState.ACTIVE:
                 return None
             return issuer(ExecutionLease(self.agent_id, self._epoch))
 
@@ -158,7 +170,7 @@ class Runtime:
             return (
                 lease.agent_id == self.agent_id
                 and lease.epoch == self._epoch
-                and self.state is RuntimeState.ACTIVE
+                and self._state is RuntimeState.ACTIVE
             )
 
     def execute_if_active(self, lease: ExecutionLease, executor: Callable[[], T]) -> T | None:
