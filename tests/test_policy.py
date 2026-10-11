@@ -47,3 +47,49 @@ def test_invalid_configuration_rejected():
         SequenceRule("", ("a",))
     with pytest.raises(ValueError):
         SequenceRule("bad", ())
+
+
+def test_agent_cannot_lower_controller_defined_operation_risk():
+    policy = PolicyEngine(max_risk=80, operation_risk={"delete_account": 95})
+    untrusted_action = Action(
+        "agent-a", "low-risk-label", "delete_account", "/accounts/123", risk=0
+    )
+
+    decision = policy.evaluate(untrusted_action)
+
+    assert decision.decision is DecisionType.HALT
+    assert "effective risk 95" in decision.reason
+    assert list(policy.history) == []
+
+
+def test_operation_risk_configuration_is_validated():
+    with pytest.raises(ValueError):
+        PolicyEngine(operation_risk={"delete_account": 101})
+    with pytest.raises(ValueError):
+        PolicyEngine(operation_risk={"": 50})
+    with pytest.raises(ValueError):
+        PolicyEngine(operation_risk={"delete_account": True})
+
+
+def test_ordered_sequence_rule_matches_with_intervening_noop():
+    policy = PolicyEngine(sequence_rules=[
+        SequenceRule("secret-exfiltration", ("read_secret", "http_post"))
+    ])
+
+    assert policy.evaluate(action("read_secret", "1")).decision is DecisionType.ALLOW
+    assert policy.evaluate(action("noop", "2")).decision is DecisionType.ALLOW
+
+    decision = policy.evaluate(action("http_post", "3"))
+    assert decision.decision is DecisionType.HALT
+    assert "secret-exfiltration" in decision.reason
+    assert list(policy.history) == ["read_secret", "noop"]
+
+
+def test_consecutive_sequence_rule_semantics_are_explicit():
+    policy = PolicyEngine(sequence_rules=[
+        SequenceRule("adjacent-only", ("read_secret", "http_post"), consecutive=True)
+    ])
+
+    assert policy.evaluate(action("read_secret", "1")).decision is DecisionType.ALLOW
+    assert policy.evaluate(action("noop", "2")).decision is DecisionType.ALLOW
+    assert policy.evaluate(action("http_post", "3")).decision is DecisionType.ALLOW
