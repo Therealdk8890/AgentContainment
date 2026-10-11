@@ -1,13 +1,16 @@
 """Egress enforcement primitives for AgentContainment."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import RLock
 from typing import Protocol
+
+from .runtime import ExecutionLease
 
 
 @dataclass(frozen=True)
 class EgressLease:
     agent_id: str
     epoch: int
+    _proof: object | None = field(default=None, repr=False, compare=False)
 
 
 class ConnectionTerminator(Protocol):
@@ -23,15 +26,14 @@ class EgressController:
         self._lock = RLock()
 
     def acquire_lease(self) -> EgressLease | None:
-        if not self.runtime.can_execute:
+        lease = self.runtime.acquire_lease()
+        if lease is None:
             return None
-        return EgressLease(self.runtime.agent_id, self.runtime.epoch)
+        return EgressLease(lease.agent_id, lease.epoch, lease._proof)
 
     def lease_valid(self, lease: EgressLease) -> bool:
-        return (
-            lease.agent_id == self.runtime.agent_id
-            and lease.epoch == self.runtime.epoch
-            and self.runtime.can_execute
+        return self.runtime.lease_valid(
+            ExecutionLease(lease.agent_id, lease.epoch, lease._proof)
         )
 
     def authorize(self, lease: EgressLease) -> bool:
