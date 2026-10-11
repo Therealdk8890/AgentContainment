@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from threading import RLock
 import uuid
@@ -16,6 +16,7 @@ class RuntimeState(str, Enum):
 class ExecutionLease:
     agent_id: str
     epoch: int
+    _proof: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class Runtime:
         self.runtime_id = runtime_id or str(uuid.uuid4())
         self._state = RuntimeState.ACTIVE
         self._epoch = 0
+        self._lease_proof = object()
         self._lock = RLock()
         self._recovery_capability = _RecoveryCapability()
 
@@ -63,11 +65,13 @@ class Runtime:
         with self._lock:
             self._state = RuntimeState.HALTED
             self._epoch += 1
+            self._lease_proof = object()
 
     def contain(self) -> None:
         with self._lock:
             self._state = RuntimeState.CONTAINED
             self._epoch += 1
+            self._lease_proof = object()
 
     def restore_contained(self, epoch: int) -> None:
         """Restore a durably contained runtime without making it executable.
@@ -82,6 +86,7 @@ class Runtime:
             if self._state is RuntimeState.ACTIVE:
                 self._state = RuntimeState.CONTAINED
                 self._epoch = epoch
+                self._lease_proof = object()
                 return
             if self._state is RuntimeState.CONTAINED:
                 if self._epoch != epoch:
@@ -121,6 +126,7 @@ class Runtime:
                 )
             self._epoch += 1
             self._state = RuntimeState.ACTIVE
+            self._lease_proof = object()
             return self._epoch
 
     def _restore_active(self, epoch: int) -> None:
@@ -130,6 +136,7 @@ class Runtime:
         with self._lock:
             self._state = RuntimeState.ACTIVE
             self._epoch = epoch
+            self._lease_proof = object()
 
     def snapshot(self) -> RuntimeSnapshot:
         """Return one atomic runtime observation.
@@ -144,14 +151,14 @@ class Runtime:
                 agent_id=self.agent_id,
                 epoch=self._epoch,
                 state=self._state,
-                can_execute=self.state is RuntimeState.ACTIVE,
+                can_execute=self._state is RuntimeState.ACTIVE,
             )
 
     def acquire_lease(self) -> ExecutionLease | None:
         with self._lock:
             if self._state is not RuntimeState.ACTIVE:
                 return None
-            return ExecutionLease(self.agent_id, self._epoch)
+            return ExecutionLease(self.agent_id, self._epoch, self._lease_proof)
 
     def issue_if_active(self, issuer: Callable[[ExecutionLease], T]) -> T | None:
         """Run an authority-issuance callback under the runtime fence lock.
@@ -163,13 +170,14 @@ class Runtime:
         with self._lock:
             if self._state is not RuntimeState.ACTIVE:
                 return None
-            return issuer(ExecutionLease(self.agent_id, self._epoch))
+            return issuer(ExecutionLease(self.agent_id, self._epoch, self._lease_proof))
 
     def lease_valid(self, lease: ExecutionLease) -> bool:
         with self._lock:
             return (
                 lease.agent_id == self.agent_id
                 and lease.epoch == self._epoch
+                and lease._proof is self._lease_proof
                 and self._state is RuntimeState.ACTIVE
             )
 
@@ -185,7 +193,8 @@ class Runtime:
             if not (
                 lease.agent_id == self.agent_id
                 and lease.epoch == self._epoch
-                and self.state is RuntimeState.ACTIVE
+                and lease._proof is self._lease_proof
+                and self._state is RuntimeState.ACTIVE
             ):
                 return None
             return executor()
@@ -198,4 +207,4 @@ class Runtime:
     @property
     def can_execute(self) -> bool:
         with self._lock:
-            return self.state is RuntimeState.ACTIVE
+            return self._state is RuntimeState.ACTIVE
