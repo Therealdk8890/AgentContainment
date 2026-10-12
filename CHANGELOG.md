@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 — 2026-10-11
+
+Security fix for forged execution leases.
+
+- Bind each `ExecutionLease` to runtime-issued provenance in addition to agent identity and epoch.
+- Reject caller-constructed leases that merely match the active agent and epoch before executing a side effect.
+- Add a regression test asserting a forged lease is denied and the executor is never called.
+- Preserve the existing trust boundary: the Python controller/runtime must remain outside the agent's process and privilege boundary; the private proof object is not isolation against hostile code running inside the controller process.
+
 ## 0.1.0 — 2026-09-25
 
 Initial public release of AgentContainment.
