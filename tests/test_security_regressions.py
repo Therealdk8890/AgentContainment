@@ -16,6 +16,8 @@ def test_forged_execution_lease_cannot_execute_side_effect():
     calls = []
     forged = ExecutionLease("agent-a", runtime.epoch)
 
+    assert runtime.lease_valid(forged) is False
+
     result = gateway.execute_with_lease(
         Action("agent-a", "forged", "write", "db"),
         forged,
@@ -39,6 +41,26 @@ def test_runtime_issued_execution_lease_can_execute():
 
     assert result == "ok"
     assert calls == ["read"]
+
+
+def test_runtime_issued_lease_is_invalidated_after_contain():
+    runtime, gateway = make_gateway()
+    lease = gateway.acquire_lease()
+    calls = []
+    assert lease is not None
+    assert runtime.lease_valid(lease) is True
+
+    runtime.contain()
+
+    assert runtime.lease_valid(lease) is False
+    result = gateway.execute_with_lease(
+        Action("agent-a", "after-contain", "write", "db"),
+        lease,
+        lambda action: calls.append(action.operation),
+    )
+
+    assert result.decision.value == "deny"
+    assert calls == []
 
 
 def test_gateway_rejects_action_agent_id_mismatch():
@@ -71,7 +93,6 @@ def test_forged_egress_lease_cannot_execute_side_effect():
     assert calls == []
 
 
-
 def test_runtime_atomic_gate_rejects_forged_lease_directly():
     runtime = Runtime("agent-a")
     calls = []
@@ -83,7 +104,6 @@ def test_runtime_atomic_gate_rejects_forged_lease_directly():
 
     assert result is None
     assert calls == []
-
 
 
 def test_authorize_rejects_mismatched_agent_without_committing_policy_history():
