@@ -6,7 +6,6 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentcontainment?label=Python)](https://pypi.org/project/agentcontainment/)
 [![License](https://img.shields.io/github/license/Therealdk8890/AgentContainment)](https://github.com/Therealdk8890/AgentContainment/blob/main/LICENSE)
 
-> **Status: Early research/prototype — not production ready.**
 
 ## Proof before platform
 
