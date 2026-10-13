@@ -2,6 +2,8 @@
 
 **Runtime containment and enforcement primitives for AI agents.**
 
+AgentContainment is the runtime enforcement layer. [WarrantKit](https://github.com/Therealdk8890/WarrantKit) is a separate, complementary project for signed Warrants, authority validation, epoch-fencing workflows, and integrations. A Warrant expresses and helps validate authority; AgentContainment's runtime-issued execution lease and enforcement path remain the side-effect boundary. Neither a valid Warrant nor a verified receipt, by itself, proves that every underlying claim is true. The projects are separately versioned and released.
+
 [![PyPI](https://img.shields.io/pypi/v/agentcontainment?label=PyPI)](https://pypi.org/project/agentcontainment/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcontainment?label=Python)](https://pypi.org/project/agentcontainment/)
 [![License](https://img.shields.io/github/license/Therealdk8890/AgentContainment)](https://github.com/Therealdk8890/AgentContainment/blob/main/LICENSE)
@@ -152,7 +154,7 @@ AgentContainment's current release should be evaluated on the controls that exis
 | Capability | Current status | What can be checked |
 |---|---|---|
 | Controller-owned authorization and policy history | **Implemented** | Unit/security tests and controller architecture |
-| Epoch fencing and stale-lease invalidation | **Implemented + adversarially tested** | Privileged validation rejects authority from expired epochs |
+| Epoch fencing and stale-lease invalidation | **Implemented + adversarially tested** | Runtime-issued leases from older epochs are rejected |
 | cgroup v2 workload containment | **Implemented + host-tested** | cgroup.kill termination and cgroup state verification |
 | Linux eBPF cgroup egress boundary | **Implemented + host-tested** | Raw socket egress is blocked after containment on the tested host/kernel |
 | Controller/agent Unix-socket boundary | **Implemented + tested** | Peer credentials and narrow control protocol |
@@ -162,6 +164,12 @@ AgentContainment's current release should be evaluated on the controls that exis
 | Hostile-agent regression runner | **Implemented** | Reproducible adversarial demonstration exits non-zero on failed selected proofs |
 
 A provider is not considered successful merely because a command or API request was accepted. Enforcement providers report explicit states such as **ENFORCED**, **VERIFICATION_FAILED**, **DEGRADED**, and **NOT_CONFIGURED**.
+
+### Security fix in v0.1.2: forged execution leases
+
+Version **0.1.2** fixes a lease-forgery flaw: an `ExecutionLease` containing a plausible agent ID and epoch is not sufficient evidence that the runtime issued it. The runtime now binds leases to runtime-issued provenance, and a caller-constructed lease is rejected before the protected side effect. A legitimate lease can still become invalid when runtime state changes.
+
+This is a runtime/API boundary, not isolation against hostile code that has already compromised the controller process or its privileges. Keep the controller and its proof state outside the agent's trust boundary, and validate the privileged enforcement path on the target host. See the [0.1.2 changelog](https://github.com/Therealdk8890/AgentContainment/blob/main/CHANGELOG.md) and [security contract](https://github.com/Therealdk8890/AgentContainment/blob/main/docs/SECURITY_CONTRACT.md).
 
 ### Not yet / roadmap
 
@@ -374,7 +382,7 @@ python -c "from importlib.metadata import version; print(version('agentcontainme
 Expected:
 
 ~~~text
-0.1.0
+0.1.2
 ~~~
 
 The core package has no third-party runtime dependencies.
@@ -388,12 +396,16 @@ git clone https://github.com/Therealdk8890/AgentContainment.git
 cd AgentContainment
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e .
+python -m pytest -q
 ~~~
+
+The default test command runs the unprivileged suite. Real cgroup/eBPF enforcement tests are opt-in and require an isolated Linux host with the necessary privileges; use the [host-boundary proof](#reproduce-the-host-boundary-proof) instructions rather than interpreting a passing unit suite as proof of kernel enforcement.
 
 ## Security and production scope
 
-**AgentContainment 0.1.0 is an early research/prototype release. It is not a production-grade universal security boundary.**
+**AgentContainment 0.1.2 is an early research/prototype release. It is not a production-grade universal security boundary.**
 
 The current release demonstrates concrete controller/enforcement boundaries, including real-host Linux/eBPF validation in the trusted CI path, but deployment guarantees depend on the environment.
 
