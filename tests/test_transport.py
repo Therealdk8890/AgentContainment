@@ -334,7 +334,7 @@ def test_slow_local_client_does_not_block_control_requests(tmp_path, monkeypatch
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(1)
             client.connect(str(path))
-            client.sendall(b'{"command":"snapshot"}\\n')
+            client.sendall(b'{"command":"snapshot"}\n')
             response = json.loads(client.recv(4096).decode())
         assert response == {"ok": True, "agents": {}}
     finally:
