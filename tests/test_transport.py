@@ -44,14 +44,13 @@ def test_protocol_register_status_and_contain(tmp_path):
 
 
 
-def test_privileged_commands_fail_closed_without_uid_configuration():
+def test_privileged_commands_fail_closed_when_peer_uid_unavailable():
     server = UnixControlServer(ContainmentService(), "/tmp/agent-containment-test.sock")
-    response = server.handle(
-        {"command": "contain", "agent_id": "agent-1"},
-        peer_uid=os.getuid(),
-    )
-    assert response["ok"] is False
-    assert response["error"] == "forbidden_command"
+    with pytest.raises(ControlProtocolError, match="forbidden_command"):
+        server.handle(
+            {"command": "contain", "agent_id": "agent-1"},
+            peer_uid=None,
+        )
 
 def test_protocol_rejects_bad_request():
     server = UnixControlServer(ContainmentService(), "/tmp/agent-containment-test.sock")
