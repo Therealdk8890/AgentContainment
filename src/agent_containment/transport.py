@@ -6,7 +6,7 @@ import os
 import socket
 import struct
 from pathlib import Path
-from threading import Event
+from threading import BoundedSemaphore, Event, Thread
 from typing import Any
 
 from .control import ContainmentService
@@ -24,13 +24,19 @@ class UnixControlServer:
     def __init__(self, service: ContainmentService, path: str | os.PathLike[str],
                  *, mode: int = 0o660, max_message_bytes: int = 64 * 1024,
                  allowed_uids: set[int] | None = None,
-                 privileged_uids: set[int] | None = None):
+                 privileged_uids: set[int] | None = None,
+                 max_concurrent_connections: int = 16):
+        if max_message_bytes < 1:
+            raise ValueError("max_message_bytes must be positive")
+        if max_concurrent_connections < 1:
+            raise ValueError("max_concurrent_connections must be positive")
         self.service = service
         self.path = Path(path)
         self.mode = mode
         self.max_message_bytes = max_message_bytes
         self.allowed_uids = allowed_uids
         self.privileged_uids = privileged_uids
+        self._connection_slots = BoundedSemaphore(max_concurrent_connections)
         self._sock: socket.socket | None = None
         self._stop = Event()
 
@@ -55,13 +61,31 @@ class UnixControlServer:
         event = stop_event or self._stop
         while not event.is_set():
             try:
-                self.serve_once()
+                conn, _ = self._sock.accept()
             except socket.timeout:
                 continue
             except OSError:
                 if event.is_set() or self._sock is None:
                     break
                 raise
+
+            # A client that connects and then stalls must not block the accept
+            # loop and prevent containment/status requests from being served.
+            # Bound worker count so concurrent slow peers cannot create an
+            # unbounded number of controller threads.
+            if not self._connection_slots.acquire(blocking=False):
+                try:
+                    self._send(conn, {"ok": False, "error": "server_busy"})
+                except OSError:
+                    pass
+                finally:
+                    conn.close()
+                continue
+            Thread(
+                target=self._serve_connection_with_slot,
+                args=(conn,),
+                daemon=True,
+            ).start()
 
     def close(self) -> None:
         self._stop.set()
@@ -77,6 +101,15 @@ class UnixControlServer:
         if self._sock is None:
             raise RuntimeError("server is not started")
         conn, _ = self._sock.accept()
+        self._serve_connection(conn)
+
+    def _serve_connection_with_slot(self, conn: socket.socket) -> None:
+        try:
+            self._serve_connection(conn)
+        finally:
+            self._connection_slots.release()
+
+    def _serve_connection(self, conn: socket.socket) -> None:
         with conn:
             # Read one bounded protocol frame before sending an authorization
             # response. Rejecting immediately after accept can race a valid

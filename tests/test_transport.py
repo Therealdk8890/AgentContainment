@@ -302,3 +302,42 @@ def test_transport_returns_clean_timeout_for_stalled_peer(tmp_path):
     finally:
         client_sock.close()
         server_sock.close()
+
+
+def test_slow_local_client_does_not_block_control_requests(tmp_path, monkeypatch):
+    """A stalled connection must not serialize the controller accept loop."""
+    path = tmp_path / "controller.sock"
+    server = UnixControlServer(
+        ContainmentService(),
+        path,
+        allowed_uids={os.getuid()},
+        max_concurrent_connections=2,
+    )
+    slow_handler_entered = threading.Event()
+    original_handler = server._serve_connection
+
+    def observe_handler(conn):
+        slow_handler_entered.set()
+        return original_handler(conn)
+
+    monkeypatch.setattr(server, "_serve_connection", observe_handler)
+    server.start()
+    loop = threading.Thread(target=server.serve_forever, daemon=True)
+    loop.start()
+    slow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    slow.settimeout(3)
+    try:
+        slow.connect(str(path))
+        assert slow_handler_entered.wait(timeout=1)
+        # The first peer sends no frame and remains blocked in recv until its
+        # request timeout. A healthy status request must still be served.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(1)
+            client.connect(str(path))
+            client.sendall(b'{"command":"snapshot"}\n')
+            response = json.loads(client.recv(4096).decode())
+        assert response == {"ok": True, "agents": {}}
+    finally:
+        slow.close()
+        server.close()
+        loop.join(timeout=1)
