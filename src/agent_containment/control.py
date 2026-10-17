@@ -86,6 +86,23 @@ class ContainmentService:
             # runtime merely because its in-memory Runtime object was rebuilt.
             durable_fence = self.fences.get(agent_id)
             prior_incident = self.incidents.latest_for_agent(agent_id)
+            if durable_fence is not None and prior_incident is None:
+                # A process may die after the durable fence is committed but
+                # before runtime containment and incident persistence. Treat
+                # the fence as an admission boundary, reconstruct an explicit
+                # incident that records the missing transition evidence, and require the normal external
+                # reconciliation path before recovery can be authorized.
+                self.incidents.record_containment(
+                    self._incident_id(agent_id, durable_fence.containment_epoch),
+                    agent_id,
+                    durable_fence.containment_epoch,
+                    reason=(
+                        "incident reconstructed from durable containment fence "
+                        "after interrupted containment; external enforcement "
+                        "must be reconciled before recovery"
+                    ),
+                )
+                prior_incident = self.incidents.latest_for_agent(agent_id)
             if durable_fence is not None:
                 if containment is None:
                     runtime.restore_contained(durable_fence.containment_epoch)

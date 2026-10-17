@@ -614,3 +614,101 @@ def test_restart_after_incident_record_before_containment_report_returns(
     assert restarted_runtime.epoch == 2
     assert external_state["contained"] is False
     assert not restarted_runtime.lease_valid(old_lease)
+
+
+
+def test_restart_repairs_incident_after_crash_immediately_after_fence(
+    monkeypatch, tmp_path
+):
+    from agent_containment.enforcer import EnforcementResult, EnforcementStatus
+
+    incident_path = tmp_path / "incidents-fence-first.json"
+    fence_path = tmp_path / "fences-fence-first.json"
+    agent_id = "agent-fence-persisted-before-runtime-containment"
+    external_state = {"contained": False}
+
+    class StatefulEnforcer:
+        name = "fence-first-enforcer"
+
+        def contain(self, _agent_id):
+            external_state["contained"] = True
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def verify_contained(self, _agent_id):
+            status = (
+                EnforcementStatus.ENFORCED
+                if external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+        def release(self, _agent_id):
+            external_state["contained"] = False
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+        def verify_released(self, _agent_id):
+            status = (
+                EnforcementStatus.RELEASED
+                if not external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+    incidents = IncidentRegistry(incident_path)
+    fences = RuntimeFenceRegistry(fence_path)
+    first = ContainmentService(incidents=incidents, fences=fences)
+    first_runtime = Runtime(agent_id)
+    enforcer = StatefulEnforcer()
+    first.register(
+        agent_id,
+        containment=ContainmentController(first_runtime, enforcers=[enforcer]),
+    )
+    old_lease = first_runtime.acquire_lease()
+    assert old_lease is not None
+
+    original_prepare = fences.prepare
+
+    def crash_after_fence(agent, epoch):
+        result = original_prepare(agent, epoch)
+        raise SystemExit("simulated crash after durable fence write")
+
+    monkeypatch.setattr(fences, "prepare", crash_after_fence)
+    with pytest.raises(SystemExit, match="after durable fence write"):
+        first.contain(agent_id)
+
+    assert first_runtime.state is RuntimeState.ACTIVE
+    assert fences.get(agent_id).containment_epoch == 1
+    assert incidents.latest_for_agent(agent_id) is None
+    assert external_state["contained"] is False
+
+    # A new process reconstructs runtime admission from the fence and repairs
+    # the missing incident; it must not infer that external enforcement ran.
+    restarted = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    restarted_runtime = restarted.register(agent_id)
+    restarted.configure_containment(
+        agent_id,
+        ContainmentController(
+            restarted_runtime, enforcers=[StatefulEnforcer()]
+        ),
+    )
+    incident = restarted.incident(agent_id)
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert incident.containment_epoch == 1
+    assert "reconstructed from durable containment fence" in (incident.reason or "")
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert restarted_runtime.epoch == 1
+    assert not restarted_runtime.lease_valid(old_lease)
+    assert external_state["contained"] is False
+
+    authorization = restarted.issue_recovery_authorization(agent_id)
+    assert external_state["contained"] is True
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert restarted.recover(agent_id, authorization) == 2
+    assert restarted_runtime.state is RuntimeState.ACTIVE
+    assert restarted_runtime.epoch == 2
+    assert external_state["contained"] is False
+    assert not restarted_runtime.lease_valid(old_lease)

@@ -1,7 +1,7 @@
 import pytest
 
 from agent_containment.control import ContainmentService
-from agent_containment.incident_state import IncidentRegistry
+from agent_containment.incident_state import IncidentRegistry, IncidentState
 from agent_containment.runtime import RuntimeState
 from agent_containment.runtime_fence import RuntimeFenceRegistry
 
@@ -52,7 +52,10 @@ def test_durable_fence_blocks_restart_even_without_incident_record(tmp_path):
 
     assert runtime.state is RuntimeState.CONTAINED
     assert runtime.epoch == 1
-    assert restarted.incident("agent-fence-only") is None
+    incident = restarted.incident("agent-fence-only")
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert "reconstructed from durable containment fence" in (incident.reason or "")
     assert runtime.acquire_lease() is None
 
 
