@@ -153,6 +153,7 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
     assert incident is not None
     assert incident.state is IncidentState.CONTAINED
 
+
 def test_restart_repairs_missing_fence_after_interrupted_recovery(monkeypatch, tmp_path):
     incident_path = tmp_path / "incidents.json"
     fence_path = tmp_path / "fences.json"
@@ -213,4 +214,4 @@ def test_restart_repairs_missing_fence_after_interrupted_recovery(monkeypatch, t
     assert restarted_runtime.state is RuntimeState.ACTIVE
     assert restarted_runtime.epoch == 2
     assert not restarted_runtime.lease_valid(old_lease)
-\n
+
