@@ -690,7 +690,7 @@ class ContainmentService:
             # before returning control to the caller.
             try:
                 self.incidents.mark_recovered(incident.incident_id)
-            except Exception as exc:
+            except OSError as exc:
                 compensation_failures: list[str] = []
                 try:
                     self.fences.prepare(agent_id, incident.containment_epoch)
@@ -716,10 +716,12 @@ class ContainmentService:
                     "; compensation failures: " + "; ".join(compensation_failures)
                     if compensation_failures else ""
                 )
-                raise RuntimeError(
-                    "recovery aborted after incident persistence failure; "
-                    "runtime remains contained" + detail
-                ) from exc
+                if compensation_failures:
+                    raise RuntimeError(
+                        "recovery aborted after incident persistence failure; "
+                        "runtime remains contained" + detail
+                    ) from exc
+                raise
             try:
                 epoch = managed.runtime.recover(
                     managed.recovery_capability,
