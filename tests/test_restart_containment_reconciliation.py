@@ -208,6 +208,10 @@ def test_restart_repairs_missing_fence_after_interrupted_recovery(monkeypatch, t
     assert restarted_runtime.state is RuntimeState.CONTAINED
     assert not restarted_runtime.lease_valid(old_lease)
 
+    # A recovery capability from the discarded controller cannot cross restart.
+    with pytest.raises(PermissionError, match="stale"):
+        restarted.recover(agent_id, authorization)
+
     resumed_authorization = restarted.issue_recovery_authorization(agent_id)
     assert restarted_runtime.state is RuntimeState.CONTAINED
     assert restarted.recover(agent_id, resumed_authorization) == 2
@@ -304,6 +308,11 @@ def test_restart_recontains_after_interrupted_recovery_released_enforcers(
     assert repaired_fence.containment_epoch == 1
     assert restarted_runtime.state is RuntimeState.CONTAINED
     assert external_state["contained"] is False
+
+    # A capability issued before restart must not be reusable, even though
+    # recovery is still pending and external containment needs reconciliation.
+    with pytest.raises(PermissionError, match="stale"):
+        restarted.recover(agent_id, authorization)
 
     # Recovery authorization must re-establish and verify external containment.
     resumed_authorization = restarted.issue_recovery_authorization(agent_id)
