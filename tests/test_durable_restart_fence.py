@@ -206,9 +206,7 @@ def test_recovery_incident_write_failure_restores_fence_and_external_containment
     authorization = service.issue_recovery_authorization(agent_id)
 
     service.incidents = FailingMarkRecoveredRegistry(incident_path)
-    with pytest.raises(
-        RuntimeError, match="recovery aborted after incident persistence failure"
-    ):
+    with pytest.raises(OSError, match="incident store unavailable during recovery"):
         service.recover(agent_id, authorization)
 
     assert runtime.state is RuntimeState.CONTAINED
