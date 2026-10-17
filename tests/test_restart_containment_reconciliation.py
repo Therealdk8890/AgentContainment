@@ -894,6 +894,9 @@ def test_restart_repairs_incident_after_crash_after_runtime_containment_before_i
         fences=RuntimeFenceRegistry(fence_path),
     )
     restarted_runtime = Runtime(agent_id)
+    # The registration contract requires a supplied runtime to be restored
+    # to the durable fenced epoch before attaching containment handlers.
+    restarted_runtime.restore_contained(1)
     restarted.register(
         agent_id,
         containment=ContainmentController(
