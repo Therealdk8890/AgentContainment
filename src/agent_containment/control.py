@@ -482,7 +482,17 @@ class ContainmentService:
             # Establish a durable fence before the runtime transition. If
             # incident persistence fails after containment, a fresh controller
             # can still reconstruct the fail-closed boundary from this fence.
-            self.fences.prepare(agent_id, next_epoch)
+            fence_persistence_failure: str | None = None
+            try:
+                self.fences.prepare(agent_id, next_epoch)
+            except Exception as exc:
+                # A failed durable write must not leave the live runtime
+                # executable. Continue containment and persist the incident if
+                # possible; registration can reconstruct a missing fence from
+                # that incident after restart.
+                fence_persistence_failure = (
+                    f"durable fence persistence unavailable: {type(exc).__name__}: {exc}"
+                )
             incident_id = self._incident_id(agent_id, next_epoch)
             self._emit_event("containment_requested", agent_id=agent_id, incident_id=incident_id, containment_epoch=next_epoch, reason="controller containment requested")
             report = managed.containment.contain()
@@ -543,6 +553,8 @@ class ContainmentService:
                 reason="controller containment requested",
                 attributes={"complete": report.complete, "stages": list(report.stages), "failures": list(report.failures)},
             )
+            if fence_persistence_failure is not None:
+                report = report.with_persistence_failure(fence_persistence_failure)
             if incident_persistence_failure is not None:
                 self._emit_event(
                     "containment_proof_degraded", agent_id=agent_id,
