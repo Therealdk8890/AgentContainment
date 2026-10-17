@@ -685,8 +685,41 @@ class ContainmentService:
                     + "; ".join(release_failures)
                 )
 
-            # Persist the admission decision before enabling execution.
-            self.incidents.mark_recovered(incident.incident_id)
+            # Persist the admission decision before enabling execution. If this
+            # write fails, restore the durable fence and external containment
+            # before returning control to the caller.
+            try:
+                self.incidents.mark_recovered(incident.incident_id)
+            except Exception as exc:
+                compensation_failures: list[str] = []
+                try:
+                    self.fences.prepare(agent_id, incident.containment_epoch)
+                except Exception as fence_exc:
+                    compensation_failures.append(
+                        f"durable fence restoration failed: {type(fence_exc).__name__}: {fence_exc}"
+                    )
+                current_incident = self.incidents.latest_for_agent(agent_id)
+                if (
+                    current_incident is not None
+                    and current_incident.state is IncidentState.RECOVERED
+                ):
+                    try:
+                        self.incidents.restore_contained(current_incident.incident_id)
+                    except Exception as incident_exc:
+                        compensation_failures.append(
+                            "incident rollback failed: "
+                            f"{type(incident_exc).__name__}: {incident_exc}"
+                        )
+                recontainment_failures = managed.containment.recontain_enforcers()
+                compensation_failures.extend(recontainment_failures)
+                detail = (
+                    "; compensation failures: " + "; ".join(compensation_failures)
+                    if compensation_failures else ""
+                )
+                raise RuntimeError(
+                    "recovery aborted after incident persistence failure; "
+                    "runtime remains contained" + detail
+                ) from exc
             try:
                 epoch = managed.runtime.recover(
                     managed.recovery_capability,
