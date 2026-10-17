@@ -5,6 +5,7 @@ from agent_containment.containment import ContainmentController
 from agent_containment.egress_enforcement import LinuxEbpfExternalEnforcer
 from agent_containment.incident_state import IncidentRegistry, IncidentState
 from agent_containment.runtime import Runtime, RuntimeState
+from agent_containment.runtime_fence import RuntimeFenceRegistry
 
 
 def _ebpf_controller(tmp_path):
@@ -151,3 +152,65 @@ def test_restart_blocks_recovery_when_external_containment_cannot_reconcile(
     incident = second.incident("agent-restart-block")
     assert incident is not None
     assert incident.state is IncidentState.CONTAINED
+
+def test_restart_repairs_missing_fence_after_interrupted_recovery(monkeypatch, tmp_path):
+    incident_path = tmp_path / "incidents.json"
+    fence_path = tmp_path / "fences.json"
+    agent_id = "agent-recovery-interrupted"
+
+    incidents = IncidentRegistry(incident_path)
+    fences = RuntimeFenceRegistry(fence_path)
+    first = ContainmentService(incidents=incidents, fences=fences)
+    first_runtime = Runtime(agent_id)
+    first.register(
+        agent_id,
+        containment=ContainmentController(first_runtime),
+    )
+    old_lease = first_runtime.acquire_lease()
+    assert old_lease is not None
+
+    assert first.contain(agent_id).epoch == 1
+    assert not first_runtime.lease_valid(old_lease)
+    authorization = first.issue_recovery_authorization(agent_id)
+
+    def crash_before_recovered_record(_incident_id):
+        raise RuntimeError("simulated controller crash before recovered record")
+
+    monkeypatch.setattr(first.incidents, "mark_recovered", crash_before_recovered_record)
+    with pytest.raises(RuntimeError, match="simulated controller crash"):
+        first.recover(agent_id, authorization)
+
+    # The fence has been cleared, but the durable incident still says contained.
+    assert first.fences.get(agent_id) is None
+    assert first.incidents.latest_for_agent(agent_id).state is IncidentState.CONTAINED
+    assert first_runtime.state is RuntimeState.CONTAINED
+
+    # Rebuild all controller-owned state from disk, as a fresh process would.
+    restarted_incidents = IncidentRegistry(incident_path)
+    restarted_fences = RuntimeFenceRegistry(fence_path)
+    restarted = ContainmentService(
+        incidents=restarted_incidents,
+        fences=restarted_fences,
+    )
+    restarted_runtime = Runtime(agent_id)
+    restarted_runtime.restore_contained(1)
+    restarted.register(
+        agent_id,
+        containment=ContainmentController(restarted_runtime),
+    )
+
+    # Restart repairs the missing fence from the still-contained incident;
+    # it does not activate the runtime or accept the pre-containment lease.
+    fence = restarted_fences.get(agent_id)
+    assert fence is not None
+    assert fence.containment_epoch == 1
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert not restarted_runtime.lease_valid(old_lease)
+
+    resumed_authorization = restarted.issue_recovery_authorization(agent_id)
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert restarted.recover(agent_id, resumed_authorization) == 2
+    assert restarted_runtime.state is RuntimeState.ACTIVE
+    assert restarted_runtime.epoch == 2
+    assert not restarted_runtime.lease_valid(old_lease)
+\n
