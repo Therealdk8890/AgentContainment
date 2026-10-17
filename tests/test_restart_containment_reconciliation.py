@@ -687,10 +687,10 @@ def test_restart_repairs_incident_after_crash_immediately_after_fence(
         incidents=IncidentRegistry(incident_path),
         fences=RuntimeFenceRegistry(fence_path),
     )
-    restarted_runtime = Runtime(agent_id)
-    restarted.register(
+    restarted_runtime = restarted.register(agent_id)
+    restarted.configure_containment(
         agent_id,
-        containment=ContainmentController(
+        ContainmentController(
             restarted_runtime, enforcers=[StatefulEnforcer()]
         ),
     )
