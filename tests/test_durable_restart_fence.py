@@ -1,8 +1,10 @@
 import pytest
 
 from agent_containment.control import ContainmentService
+from agent_containment.containment import ContainmentController
+from agent_containment.enforcer import EnforcementResult, EnforcementStatus
 from agent_containment.incident_state import IncidentRegistry, IncidentState
-from agent_containment.runtime import RuntimeState
+from agent_containment.runtime import Runtime, RuntimeState
 from agent_containment.runtime_fence import RuntimeFenceRegistry
 
 
@@ -150,4 +152,72 @@ def test_fence_persistence_failure_still_contains_runtime_and_recovers_from_inci
     fence = restarted.fences.get(agent_id)
     assert fence is not None
     assert fence.containment_epoch == 1
+
+class FailingMarkRecoveredRegistry(IncidentRegistry):
+    def mark_recovered(self, incident_id):
+        raise OSError("incident store unavailable during recovery")
+
+
+def test_recovery_incident_write_failure_restores_fence_and_external_containment(
+    tmp_path,
+):
+    incident_path = tmp_path / "incidents-recovery-write-failure.json"
+    fence_path = tmp_path / "fences-recovery-write-failure.json"
+    agent_id = "agent-recovery-incident-write-failure"
+    external_state = {"contained": False}
+
+    class StatefulEnforcer:
+        name = "recovery-write-failure-enforcer"
+
+        def contain(self, _agent_id):
+            external_state["contained"] = True
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def verify_contained(self, _agent_id):
+            status = (
+                EnforcementStatus.ENFORCED
+                if external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+        def release(self, _agent_id):
+            external_state["contained"] = False
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+        def verify_released(self, _agent_id):
+            status = (
+                EnforcementStatus.RELEASED
+                if not external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+    incidents = IncidentRegistry(incident_path)
+    fences = RuntimeFenceRegistry(fence_path)
+    runtime = Runtime(agent_id)
+    enforcer = StatefulEnforcer()
+    service = ContainmentService(incidents=incidents, fences=fences)
+    service.register(
+        agent_id,
+        containment=ContainmentController(runtime, enforcers=[enforcer]),
+    )
+    assert service.contain(agent_id).certified
+    authorization = service.issue_recovery_authorization(agent_id)
+
+    service.incidents = FailingMarkRecoveredRegistry(incident_path)
+    with pytest.raises(
+        RuntimeError, match="recovery aborted after incident persistence failure"
+    ):
+        service.recover(agent_id, authorization)
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.epoch == 1
+    incident = IncidentRegistry(incident_path).latest_for_agent(agent_id)
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    fence = RuntimeFenceRegistry(fence_path).get(agent_id)
+    assert fence is not None
+    assert fence.containment_epoch == 1
+    assert external_state["contained"] is True
 
