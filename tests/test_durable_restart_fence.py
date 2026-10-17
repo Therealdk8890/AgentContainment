@@ -102,6 +102,7 @@ def test_recovery_does_not_clear_fence_if_fence_persistence_fails(tmp_path):
     assert runtime.state is RuntimeState.CONTAINED
     assert runtime.acquire_lease() is None
 
+
 class FailingOnceFenceRegistry(RuntimeFenceRegistry):
     def __init__(self, path):
         super().__init__(path)
