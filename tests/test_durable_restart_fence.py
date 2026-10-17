@@ -99,3 +99,55 @@ def test_recovery_does_not_clear_fence_if_fence_persistence_fails(tmp_path):
 
     assert runtime.state is RuntimeState.CONTAINED
     assert runtime.acquire_lease() is None
+
+class FailingOnceFenceRegistry(RuntimeFenceRegistry):
+    def __init__(self, path):
+        super().__init__(path)
+        self.fail_next_prepare = True
+
+    def prepare(self, agent_id, containment_epoch):
+        if self.fail_next_prepare:
+            self.fail_next_prepare = False
+            raise OSError("transient fence store failure")
+        return super().prepare(agent_id, containment_epoch)
+
+
+def test_fence_persistence_failure_still_contains_runtime_and_recovers_from_incident(
+    tmp_path,
+):
+    incident_path = tmp_path / "incidents-fence-write-failure.json"
+    fence_path = tmp_path / "fences-fence-write-failure.json"
+    agent_id = "agent-fence-write-failure"
+    service = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=FailingOnceFenceRegistry(fence_path),
+    )
+    runtime = service.register(agent_id)
+    old_lease = runtime.acquire_lease()
+    assert old_lease is not None
+
+    report = service.contain(agent_id)
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.epoch == 1
+    assert not runtime.lease_valid(old_lease)
+    assert not report.durable
+    assert "durable fence persistence unavailable" in report.persistence_failures[0]
+    incident = service.incident(agent_id)
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert RuntimeFenceRegistry(fence_path).get(agent_id) is None
+
+    # A fresh service reconstructs the missing fence from the durable incident.
+    restarted = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    restarted_runtime = restarted.register(agent_id)
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert restarted_runtime.epoch == 1
+    assert restarted_runtime.acquire_lease() is None
+    fence = restarted.fences.get(agent_id)
+    assert fence is not None
+    assert fence.containment_epoch == 1
+
