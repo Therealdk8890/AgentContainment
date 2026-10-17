@@ -106,7 +106,7 @@ class ContainmentService:
                     # operator can explicitly distinguish a contained runtime
                     # from one attested active by the runtime authority.
                     raise RuntimeError(
-                        "durable recovery state requires an explicitly supplied runtime and containment controller"
+                        "durable recovery state requires an explicitly supplied active runtime or contained runtime with containment controller"
                     )
                 if (
                     runtime.state is RuntimeState.CONTAINED
