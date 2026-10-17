@@ -103,6 +103,19 @@ class ContainmentService:
                     ),
                 )
                 prior_incident = self.incidents.latest_for_agent(agent_id)
+            if (
+                durable_fence is not None
+                and prior_incident is not None
+                and prior_incident.state is IncidentState.RECOVERED
+            ):
+                # A surviving fence means recovery did not fully commit, even
+                # if the incident write reached RECOVERED before rollback failed.
+                if prior_incident.containment_epoch != durable_fence.containment_epoch:
+                    raise RuntimeError(
+                        "durable fence epoch conflicts with recovered incident"
+                    )
+                self.incidents.restore_contained(prior_incident.incident_id)
+                prior_incident = self.incidents.latest_for_agent(agent_id)
             if durable_fence is not None:
                 if containment is None:
                     runtime.restore_contained(durable_fence.containment_epoch)
@@ -727,13 +740,28 @@ class ContainmentService:
                     managed.recovery_capability,
                     incident.containment_epoch,
                 )
-            except Exception:
-                self.incidents.restore_contained(incident.incident_id)
-                managed.containment.recontain_enforcers()
+            except Exception as exc:
+                compensation_failures: list[str] = []
                 try:
                     self.fences.prepare(agent_id, incident.containment_epoch)
-                except Exception:
-                    pass
+                except Exception as fence_exc:
+                    compensation_failures.append(
+                        f"durable fence restoration failed: {type(fence_exc).__name__}: {fence_exc}"
+                    )
+                try:
+                    self.incidents.restore_contained(incident.incident_id)
+                except Exception as incident_exc:
+                    compensation_failures.append(
+                        "incident rollback failed: "
+                        f"{type(incident_exc).__name__}: {incident_exc}"
+                    )
+                recontainment_failures = managed.containment.recontain_enforcers()
+                compensation_failures.extend(recontainment_failures)
+                if compensation_failures:
+                    raise RuntimeError(
+                        "runtime activation failed; runtime remains contained; "
+                        "compensation failures: " + "; ".join(compensation_failures)
+                    ) from exc
                 raise
 
             # Recovery starts a fresh execution epoch. Do not let the
