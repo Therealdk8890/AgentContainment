@@ -1002,6 +1002,10 @@ def test_restart_reconciles_process_crash_after_enforcer_release_before_incident
         ),
     )
 
+    # A capability issued by the dead controller must not survive restart.
+    with pytest.raises(PermissionError, match="stale"):
+        restarted.recover(agent_id, authorization)
+
     # Restart repairs the missing fence but does not mistake an unreconciled
     # external boundary for successful recovery.
     repaired_fence = restarted.fences.get(agent_id)
