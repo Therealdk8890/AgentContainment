@@ -90,7 +90,7 @@ class ContainmentService:
                 # A process may die after the durable fence is committed but
                 # before runtime containment and incident persistence. Treat
                 # the fence as an admission boundary, reconstruct an explicit
-                # degraded-proof incident, and require the normal external
+                # incident that records the missing transition evidence, and require the normal external
                 # reconciliation path before recovery can be authorized.
                 self.incidents.record_containment(
                     self._incident_id(agent_id, durable_fence.containment_epoch),
