@@ -122,6 +122,14 @@ class ContainmentService:
                 IncidentState.CONTAINED,
                 IncidentState.PROOF_DEGRADED,
             ):
+                # Recovery clears the durable fence before releasing external
+                # enforcement and committing the RECOVERED incident. If the
+                # controller dies in that window, the still-contained incident
+                # is authoritative evidence to reconstruct the fence—not to
+                # enable execution. Recreate the missing fence so the normal
+                # reconciliation/recovery path can safely resume.
+                if durable_fence is None:
+                    self.fences.prepare(agent_id, prior_incident.containment_epoch)
                 if containment is None:
                     runtime.restore_contained(prior_incident.containment_epoch)
                 elif runtime.can_execute:
