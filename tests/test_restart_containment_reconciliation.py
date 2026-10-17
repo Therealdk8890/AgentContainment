@@ -478,10 +478,10 @@ def test_restart_accepts_runtime_activated_before_controller_crash(
 
     def crash_after_activation(capability, expected_epoch):
         epoch = original_recover(capability, expected_epoch)
-        raise RuntimeError("simulated controller crash after runtime activation")
+        raise SystemExit("simulated controller crash after runtime activation")
 
     monkeypatch.setattr(first_runtime, "recover", crash_after_activation)
-    with pytest.raises(RuntimeError, match="after runtime activation"):
+    with pytest.raises(SystemExit, match="after runtime activation"):
         first.recover(agent_id, authorization)
 
     assert first.incidents.latest_for_agent(agent_id).state is IncidentState.RECOVERED
