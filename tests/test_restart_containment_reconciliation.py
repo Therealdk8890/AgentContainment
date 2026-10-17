@@ -818,3 +818,101 @@ def test_restart_repairs_fence_after_crash_immediately_after_recovery_fence_clea
     assert external_state["contained"] is False
     assert not restarted_runtime.lease_valid(old_lease)
 
+
+
+def test_restart_repairs_incident_after_crash_after_runtime_containment_before_incident_write(
+    tmp_path,
+):
+    from agent_containment.enforcer import EnforcementResult, EnforcementStatus
+
+    incident_path = tmp_path / "incidents-runtime-first.json"
+    fence_path = tmp_path / "fences-runtime-first.json"
+    agent_id = "agent-runtime-contained-before-incident"
+    external_state = {"contained": False}
+
+    class StatefulEnforcer:
+        name = "runtime-first-enforcer"
+
+        def contain(self, _agent_id):
+            external_state["contained"] = True
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def verify_contained(self, _agent_id):
+            status = (
+                EnforcementStatus.ENFORCED
+                if external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+        def release(self, _agent_id):
+            external_state["contained"] = False
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+        def verify_released(self, _agent_id):
+            status = (
+                EnforcementStatus.RELEASED
+                if not external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+    incidents = IncidentRegistry(incident_path)
+    fences = RuntimeFenceRegistry(fence_path)
+    first = ContainmentService(incidents=incidents, fences=fences)
+    first_runtime = Runtime(agent_id)
+    enforcer = StatefulEnforcer()
+    first.register(
+        agent_id,
+        containment=ContainmentController(first_runtime, enforcers=[enforcer]),
+    )
+    old_lease = first_runtime.acquire_lease()
+    assert old_lease is not None
+
+    managed = first._managed(agent_id)
+    original_contain = managed.containment.contain
+
+    def contain_then_crash():
+        report = original_contain()
+        raise SystemExit("simulated crash after runtime and external containment")
+
+    managed.containment.contain = contain_then_crash
+    with pytest.raises(SystemExit, match="after runtime and external containment"):
+        first.contain(agent_id)
+
+    # The fence and runtime transition committed, but the incident write did not.
+    assert fences.get(agent_id).containment_epoch == 1
+    assert first_runtime.state is RuntimeState.CONTAINED
+    assert first_runtime.epoch == 1
+    assert incidents.latest_for_agent(agent_id) is None
+    assert external_state["contained"] is True
+    assert not first_runtime.lease_valid(old_lease)
+
+    # A fresh service reconstructs the missing incident from the durable fence.
+    restarted = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    restarted_runtime = Runtime(agent_id)
+    restarted.register(
+        agent_id,
+        containment=ContainmentController(
+            restarted_runtime, enforcers=[StatefulEnforcer()]
+        ),
+    )
+    incident = restarted.incident(agent_id)
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert incident.containment_epoch == 1
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert restarted_runtime.epoch == 1
+    assert restarted_runtime.acquire_lease() is None
+    assert external_state["contained"] is True
+
+    authorization = restarted.issue_recovery_authorization(agent_id)
+    assert external_state["contained"] is True
+    assert restarted.recover(agent_id, authorization) == 2
+    assert restarted_runtime.state is RuntimeState.ACTIVE
+    assert restarted_runtime.epoch == 2
+    assert external_state["contained"] is False
+    assert not restarted_runtime.lease_valid(old_lease)
