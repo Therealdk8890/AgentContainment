@@ -479,9 +479,9 @@ class ContainmentService:
         with self._lock:
             managed = self._managed(agent_id)
             next_epoch = managed.runtime.epoch + 1
-            # Establish a durable fence before the runtime transition. If
-            # incident persistence fails after containment, a fresh controller
-            # can still reconstruct the fail-closed boundary from this fence.
+            # Attempt a durable fence before the runtime transition. If that
+            # write fails, still contain the live runtime and persist the
+            # incident where possible so restart can reconstruct the fence.
             fence_persistence_failure: str | None = None
             try:
                 self.fences.prepare(agent_id, next_epoch)
