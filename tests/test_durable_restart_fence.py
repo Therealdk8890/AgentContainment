@@ -220,3 +220,87 @@ def test_recovery_incident_write_failure_restores_fence_and_external_containment
     assert fence.containment_epoch == 1
     assert external_state["contained"] is True
 
+class FailingRestoreContainedRegistry(IncidentRegistry):
+    def restore_contained(self, incident_id):
+        raise OSError("incident rollback store unavailable")
+
+
+def test_restart_repairs_recovered_incident_when_rollback_write_fails(tmp_path):
+    incident_path = tmp_path / "incidents-rollback-write-failure.json"
+    fence_path = tmp_path / "fences-rollback-write-failure.json"
+    agent_id = "agent-rollback-write-failure"
+    external_state = {"contained": False}
+
+    class StatefulEnforcer:
+        name = "rollback-write-failure-enforcer"
+
+        def contain(self, _agent_id):
+            external_state["contained"] = True
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED)
+
+        def verify_contained(self, _agent_id):
+            status = (
+                EnforcementStatus.ENFORCED
+                if external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+        def release(self, _agent_id):
+            external_state["contained"] = False
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED)
+
+        def verify_released(self, _agent_id):
+            status = (
+                EnforcementStatus.RELEASED
+                if not external_state["contained"]
+                else EnforcementStatus.VERIFICATION_FAILED
+            )
+            return EnforcementResult(self.name, status)
+
+    incidents = IncidentRegistry(incident_path)
+    fences = RuntimeFenceRegistry(fence_path)
+    runtime = Runtime(agent_id)
+    enforcer = StatefulEnforcer()
+    service = ContainmentService(incidents=incidents, fences=fences)
+    service.register(
+        agent_id,
+        containment=ContainmentController(runtime, enforcers=[enforcer]),
+    )
+    old_lease = runtime.acquire_lease()
+    assert old_lease is not None
+    assert service.contain(agent_id).certified
+    authorization = service.issue_recovery_authorization(agent_id)
+
+    def fail_runtime_activation(_capability, _expected_epoch):
+        raise RuntimeError("simulated runtime activation failure")
+
+    runtime.recover = fail_runtime_activation
+    service.incidents = FailingRestoreContainedRegistry(incident_path)
+    with pytest.raises(RuntimeError, match="incident rollback failed"):
+        service.recover(agent_id, authorization)
+
+    assert runtime.state is RuntimeState.CONTAINED
+    assert not runtime.lease_valid(old_lease)
+    assert external_state["contained"] is True
+    fence = RuntimeFenceRegistry(fence_path).get(agent_id)
+    assert fence is not None
+    assert fence.containment_epoch == 1
+    # The incident write could not be rolled back in-process. On restart, the
+    # surviving fence takes precedence and repairs the ambiguous RECOVERED row.
+    restarted = ContainmentService(
+        incidents=IncidentRegistry(incident_path),
+        fences=RuntimeFenceRegistry(fence_path),
+    )
+    restarted_runtime = Runtime(agent_id)
+    restarted_runtime.restore_contained(1)
+    restarted.register(
+        agent_id,
+        containment=ContainmentController(restarted_runtime),
+    )
+    incident = restarted.incident(agent_id)
+    assert incident is not None
+    assert incident.state is IncidentState.CONTAINED
+    assert restarted_runtime.state is RuntimeState.CONTAINED
+    assert not restarted_runtime.lease_valid(old_lease)
+
