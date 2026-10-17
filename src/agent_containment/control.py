@@ -108,14 +108,34 @@ class ContainmentService:
                 and prior_incident is not None
                 and prior_incident.state is IncidentState.RECOVERED
             ):
-                # A surviving fence means recovery did not fully commit, even
-                # if the incident write reached RECOVERED before rollback failed.
-                if prior_incident.containment_epoch != durable_fence.containment_epoch:
+                if prior_incident.containment_epoch == durable_fence.containment_epoch:
+                    # A surviving fence at the original containment epoch means
+                    # recovery rollback did not fully commit, even if the
+                    # incident write reached RECOVERED before rollback failed.
+                    self.incidents.restore_contained(prior_incident.incident_id)
+                    prior_incident = self.incidents.latest_for_agent(agent_id)
+                elif (
+                    prior_incident.recovery_epoch is not None
+                    and durable_fence.containment_epoch > prior_incident.recovery_epoch
+                ):
+                    # A newer fence means a later containment was requested
+                    # after the previously recorded recovery. Reconstruct that
+                    # newer incident rather than confusing it with rollback.
+                    self.incidents.record_containment(
+                        self._incident_id(agent_id, durable_fence.containment_epoch),
+                        agent_id,
+                        durable_fence.containment_epoch,
+                        reason=(
+                            "incident reconstructed from durable containment fence "
+                            "after interrupted containment following prior recovery; "
+                            "external enforcement must be reconciled before recovery"
+                        ),
+                    )
+                    prior_incident = self.incidents.latest_for_agent(agent_id)
+                else:
                     raise RuntimeError(
                         "durable fence epoch conflicts with recovered incident"
                     )
-                self.incidents.restore_contained(prior_incident.incident_id)
-                prior_incident = self.incidents.latest_for_agent(agent_id)
             if durable_fence is not None:
                 if containment is None:
                     runtime.restore_contained(durable_fence.containment_epoch)
