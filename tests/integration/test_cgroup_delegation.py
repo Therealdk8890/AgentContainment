@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The child drops privileges; resolve the source package explicitly instead
+# of depending on the editable-install finder in the parent interpreter.
+sys.path.insert(0, sys.argv[4])
 from agent_containment.linux_supervisor import LinuxCgroupSupervisor
 
 parent = Path(sys.argv[1])
@@ -106,7 +110,15 @@ supervisor.remove(agent)
 marker.write_text("passed", encoding="utf-8")
 """
 
+    child_import_root = Path(f"/tmp/agent-containment-python-{os.getpid()}")
+
     try:
+        source_package = Path(__file__).resolve().parents[2] / "src"
+        shutil.copytree(source_package, child_import_root)
+        os.chmod(child_import_root, 0o755)
+        for copied_path in child_import_root.rglob("*"):
+            os.chmod(copied_path, 0o755 if copied_path.is_dir() else 0o644)
+
         parent.mkdir()
         outside = cgroup_root / f"agent-containment-outside-{os.getpid()}"
         outside.mkdir()
@@ -120,7 +132,7 @@ marker.write_text("passed", encoding="utf-8")
         (outside / "cgroup.procs").write_text(f"{outside_pid}\n")
 
         child = subprocess.Popen(
-            [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid)],
+            [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid), str(child_import_root)],
 
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -148,6 +160,7 @@ marker.write_text("passed", encoding="utf-8")
             except OSError:
                 pass
         marker.unlink(missing_ok=True)
+        shutil.rmtree(child_import_root, ignore_errors=True)
 
 
 def test_real_systemd_delegate_yes_enforces_boundary_and_containment():
