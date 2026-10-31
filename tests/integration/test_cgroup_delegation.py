@@ -111,13 +111,14 @@ marker.write_text("passed", encoding="utf-8")
 """
 
     child_import_root = Path(f"/tmp/agent-containment-python-{os.getpid()}")
-    source_package = Path(__file__).resolve().parents[2] / "src"
-    shutil.copytree(source_package, child_import_root)
-    os.chmod(child_import_root, 0o755)
-    for copied_path in child_import_root.rglob("*"):
-        os.chmod(copied_path, 0o755 if copied_path.is_dir() else 0o644)
 
     try:
+        source_package = Path(__file__).resolve().parents[2] / "src"
+        shutil.copytree(source_package, child_import_root)
+        os.chmod(child_import_root, 0o755)
+        for copied_path in child_import_root.rglob("*"):
+            os.chmod(copied_path, 0o755 if copied_path.is_dir() else 0o644)
+
         parent.mkdir()
         outside = cgroup_root / f"agent-containment-outside-{os.getpid()}"
         outside.mkdir()
