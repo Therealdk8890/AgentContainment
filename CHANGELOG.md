@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 — 2026-10-31
+
+### Added
+
+- Reject recovery authorizations issued by a controller instance that has been discarded by a process restart; callers must obtain fresh recovery authorization from the restarted controller.
+- Extend restart-boundary regression coverage for stale recovery capabilities before and after external enforcement reconciliation.
+
+### Fixed
+
+- Reconcile a crash after external enforcement release but before the incident record is committed, preserving fail-closed recovery behavior.
+- Make the delegated-cgroup child-process integration test resolve the package source reliably after dropping privileges, and clean up its staged import tree.
+
 ## 0.1.2 — 2026-10-11
 
 Security fix for forged execution leases.

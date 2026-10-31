@@ -25,6 +25,7 @@ jobs:
         run: timeout --signal=TERM --kill-after=10s 120s pytest -vv
 
   unit-and-adapters:
+    name: Unit and adapter tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -79,6 +80,7 @@ jobs:
       - run: bash scripts/build_ebpf.sh
 
   ebpf-privileged-integration:
+    name: Linux cgroup-v2 workload proof
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
