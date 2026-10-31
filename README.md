@@ -367,7 +367,7 @@ This provides a foundation for multi-agent containment without assuming that eve
 
 ### PyPI
 
-The first public release is now available:
+The current release is now available:
 
 ~~~bash
 python -m pip install agentcontainment
@@ -382,7 +382,7 @@ python -c "from importlib.metadata import version; print(version('agentcontainme
 Expected:
 
 ~~~text
-0.1.2
+0.1.3
 ~~~
 
 The core package has no third-party runtime dependencies.
@@ -405,7 +405,7 @@ The default test command runs the unprivileged suite. Real cgroup/eBPF enforceme
 
 ## Security and production scope
 
-**AgentContainment 0.1.2 is an early research/prototype release. It is not a production-grade universal security boundary.**
+**AgentContainment 0.1.3 is an early research/prototype release. It is not a production-grade universal security boundary.**
 
 The current release demonstrates concrete controller/enforcement boundaries, including real-host Linux/eBPF validation in the trusted CI path, but deployment guarantees depend on the environment.
 
