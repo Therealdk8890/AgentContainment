@@ -49,11 +49,11 @@ from pathlib import Path
 
 # The child drops privileges; resolve the source package explicitly instead
 # of depending on the editable-install finder in the parent interpreter.
-sys.path.insert(0, sys.argv[4])
+sys.path.insert(0, sys.argv[3])
 from agent_containment.linux_supervisor import LinuxCgroupSupervisor
 
-parent = Path(sys.argv[1])
-marker = Path(sys.argv[2])
+parent = Path(sys.argv[0])
+marker = Path(sys.argv[1])
 marker.write_text("started", encoding="utf-8")
 
 supervisor = LinuxCgroupSupervisor("auto")
@@ -85,7 +85,7 @@ if not supervisor.pid_in_cgroup(workload.pid, agent):
 if not supervisor.is_populated(agent):
     raise SystemExit("delegated child cgroup is not populated")
 
-outside_pid = int(sys.argv[3])
+outside_pid = int(sys.argv[2])
 try:
     supervisor.attach_pid(agent, outside_pid)
 except PermissionError:
