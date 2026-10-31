@@ -2,8 +2,14 @@ name: release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +28,7 @@ jobs:
           python-version: "3.12"
 
       - name: Validate release tag matches package version
+        if: github.ref_type == 'tag'
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -67,6 +74,7 @@ jobs:
 
   check-pypi:
     name: Check PyPI publication state
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     outputs:
@@ -102,7 +110,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: check-pypi
-    if: needs.check-pypi.outputs.published != 'true'
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.check-pypi.outputs.published != 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -119,7 +127,7 @@ jobs:
   already-published:
     name: PyPI already contains this version
     needs: check-pypi
-    if: needs.check-pypi.outputs.published == 'true'
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.check-pypi.outputs.published == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Record successful idempotent release
