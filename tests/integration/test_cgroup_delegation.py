@@ -47,6 +47,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The child drops privileges; resolve the source package explicitly instead
+# of depending on the editable-install finder in the parent interpreter.
+sys.path.insert(0, sys.argv[4])
 from agent_containment.linux_supervisor import LinuxCgroupSupervisor
 
 parent = Path(sys.argv[1])
@@ -120,7 +123,7 @@ marker.write_text("passed", encoding="utf-8")
         (outside / "cgroup.procs").write_text(f"{outside_pid}\n")
 
         child = subprocess.Popen(
-            [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid)],
+            [sys.executable, "-c", child_code, str(parent), str(marker), str(outside_pid), str(Path(__file__).resolve().parents[2] / "src")],
 
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
