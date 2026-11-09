@@ -47,6 +47,7 @@ class Runtime:
         self._epoch = 0
         self._lease_proof = object()
         self._lock = RLock()
+        self._inflight_executions = 0
         self._recovery_capability = _RecoveryCapability()
 
     @property
@@ -182,12 +183,15 @@ class Runtime:
             )
 
     def execute_if_active(self, lease: ExecutionLease, executor: Callable[[], T]) -> T | None:
-        """Atomically validate a lease and begin the modeled side effect.
+        """Admit an execution atomically, then run its callback outside the state lock.
 
-        Containment/halt cannot transition the runtime between validation and
-        invocation of executor. Once the executor starts, this primitive does
-        not claim to interrupt the external side effect; real adapters must
-        provide their own cancellation/revocation semantics.
+        Lease validation and in-flight admission are serialized with halt/contain.
+        Once admitted, the callback is an in-flight operation: a later fence
+        invalidates all leases and prevents new admissions, but does not itself
+        stop a callback that has already been admitted. External process/network
+        enforcers must terminate or revoke that work at the actual enforcement
+        boundary. Arbitrary application code is never run while holding the
+        runtime lifecycle lock, so a blocked callback cannot delay the fence.
         """
         with self._lock:
             if not (
@@ -197,7 +201,19 @@ class Runtime:
                 and self._state is RuntimeState.ACTIVE
             ):
                 return None
+            self._inflight_executions += 1
+
+        try:
             return executor()
+        finally:
+            with self._lock:
+                self._inflight_executions -= 1
+
+    @property
+    def inflight_executions(self) -> int:
+        """Number of callbacks admitted but not yet completed."""
+        with self._lock:
+            return self._inflight_executions
 
     @property
     def epoch(self) -> int:
