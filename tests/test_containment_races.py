@@ -1,7 +1,10 @@
 import threading
 
+import pytest
+
 from agent_containment import Action, ActionGateway, PolicyEngine
 from agent_containment.containment import ContainmentController
+from agent_containment.enforcer import EnforcementResult, EnforcementStatus
 from agent_containment.runtime import Runtime, RuntimeState
 
 
@@ -82,39 +85,34 @@ def test_new_lease_cannot_be_acquired_after_halt():
     assert runtime.acquire_lease() is None
 
 
-
-
-def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
-    """Halt cannot interleave with the atomic lease-check-and-start boundary."""
-    runtime = Runtime("agent-halt-inflight-boundary")
+def test_containment_fences_and_runs_external_enforcer_while_callback_is_blocked():
+    runtime = Runtime("agent-containment-inflight-boundary")
     lease = runtime.acquire_lease()
     assert lease is not None
 
     executor_started = threading.Event()
     release_executor = threading.Event()
-    halt_lock_attempted = threading.Event()
-    halt_completed = threading.Event()
+    enforcer_started = threading.Event()
+    containment_completed = threading.Event()
     effects = []
 
-    class ObservedLock:
-        """Signal when the halt thread attempts the runtime lock, before blocking."""
+    class RecordingEnforcer:
+        name = "recording-enforcer"
 
-        def __init__(self, wrapped):
-            self._wrapped = wrapped
+        def contain(self, agent_id):
+            enforcer_started.set()
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED, "contained")
 
-        def __enter__(self):
-            if threading.current_thread().name == "halt-under-test":
-                halt_lock_attempted.set()
-            self._wrapped.acquire()
-            return self
+        def verify_contained(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.ENFORCED, "verified")
 
-        def __exit__(self, exc_type, exc_value, traceback):
-            self._wrapped.release()
-            return False
+        def release(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED, "released")
 
-    # Instrument the existing lock so the test knows halt has actually reached
-    # the lock boundary, rather than relying on a sleep or scheduler timing.
-    runtime._lock = ObservedLock(runtime._lock)
+        def verify_released(self, agent_id):
+            return EnforcementResult(self.name, EnforcementStatus.RELEASED, "verified")
+
+    controller = ContainmentController(runtime, enforcers=[RecordingEnforcer()])
 
     def blocking_side_effect():
         effects.append("in-flight-started")
@@ -130,26 +128,45 @@ def test_halt_waits_for_inflight_side_effect_then_rejects_old_lease():
     )
     worker.start()
     assert executor_started.wait(THREAD_TIMEOUT), "side effect did not start"
+    assert runtime.inflight_executions == 1
 
-    halter = threading.Thread(
-        target=lambda: (runtime.halt(), halt_completed.set()),
-        name="halt-under-test",
-        daemon=True,
-    )
+    def contain():
+        controller.contain()
+        containment_completed.set()
+
+    halter = threading.Thread(target=contain, name="containment-under-test", daemon=True)
     halter.start()
-    assert halt_lock_attempted.wait(THREAD_TIMEOUT), "halt did not attempt the runtime lock"
 
-    # Halt has reached the lock and must remain blocked while the callback holds it.
-    assert not halt_completed.is_set(), "halt completed inside the in-flight execution section"
+    assert containment_completed.wait(THREAD_TIMEOUT), (
+        "containment did not complete while the admitted callback was blocked"
+    )
+    assert enforcer_started.is_set(), "external enforcement did not start before callback release"
+    assert runtime.state is RuntimeState.CONTAINED
+    assert runtime.acquire_lease() is None
+    assert runtime.execute_if_active(lease, lambda: effects.append("stale-side-effect")) is None
+    assert effects == ["in-flight-started"]
+    assert runtime.inflight_executions == 1
 
     release_executor.set()
     worker.join(timeout=THREAD_TIMEOUT)
     halter.join(timeout=THREAD_TIMEOUT)
 
     assert not worker.is_alive(), "executor thread did not finish"
-    assert not halter.is_alive(), "halt thread did not finish"
-    assert halt_completed.is_set()
+    assert not halter.is_alive(), "containment thread did not finish"
     assert effects == ["in-flight-started", "in-flight-completed"]
-    assert runtime.state is RuntimeState.HALTED
-    assert runtime.execute_if_active(lease, lambda: effects.append("stale-side-effect")) is None
-    assert effects == ["in-flight-started", "in-flight-completed"]
+    assert runtime.inflight_executions == 0
+    assert runtime.state is RuntimeState.CONTAINED
+
+
+def test_inflight_execution_count_is_released_when_callback_raises():
+    runtime = Runtime("agent-callback-exception")
+    lease = runtime.acquire_lease()
+    assert lease is not None
+
+    def fail():
+        raise ValueError("expected test failure")
+
+    with pytest.raises(ValueError, match="expected test failure"):
+        runtime.execute_if_active(lease, fail)
+
+    assert runtime.inflight_executions == 0
