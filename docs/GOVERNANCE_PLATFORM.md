@@ -10,6 +10,12 @@ AgentContainment is the control and enforcement primitive in a larger AI-agent g
 
 The platform should preserve a hard security boundary: provenance and containment may be integrated, but an agent must never be able to authorize its own recovery or rewrite controller-owned incident evidence.
 
+## Product boundary: NobodySystems is the operator-facing platform
+
+The implementation and security contracts in this repository remain **Apache-2.0 AgentContainment**: local controller-side policy, runtime execution leases, external enforcement providers, containment, recovery, and proof receipts. **WarrantKit** provides separate runtime-bound execution authority; **DProvenanceKit** provides separate evidence instrumentation, signing, and verification. Neither evidence nor Warrant validation may grant an agent its own containment authority.
+
+**NobodySystems** is the separately licensed **private-alpha operational/control-plane layer** coordinating those independent engines. Its present local-controller evaluation is bounded; policy lifecycle at organizational scale, cross-run evidence correlation, fleet operations, production tenant/RBAC assurances, and hosted editions are planned rather than shipped. The diagrams and proposed hosted phases below describe architecture/roadmap, **not** currently available AgentContainment features or contractual enterprise guarantees. See [NobodySystems integration and commercial boundary](NOBODYSYSTEMS.md).
+
 ## Closed governance loop
 
 `Observe → Prove → Authorize → Enforce → Contain → Recover → Regression`
@@ -147,7 +153,7 @@ This is the mechanism that turns production safety failures into continuously en
 - regression evidence
 - export/verification of provenance records
 
-### Hosted control plane eventually owns
+### NobodySystems enterprise operating plane eventually owns (planned; not delivered)
 
 - organization and agent inventory
 - policy management
