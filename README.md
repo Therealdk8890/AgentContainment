@@ -9,6 +9,14 @@ AgentContainment is the runtime enforcement layer. [WarrantKit](https://github.c
 [![License](https://img.shields.io/github/license/Therealdk8890/AgentContainment)](https://github.com/Therealdk8890/AgentContainment/blob/main/LICENSE)
 
 
+## Open-source enforcement; NobodySystems enterprise operations
+
+**AgentContainment is the independent Apache-2.0 enforcement engine.** Its local controller and privileged Linux proofs are usable without a hosted service. [WarrantKit](https://github.com/Therealdk8890/WarrantKit) adds runtime/epoch-bound authority; [DProvenanceKit](https://github.com/Therealdk8890/DProvenanceKit) adds independently verifiable trace evidence. Each engine has a separate release and trust boundary.
+
+**NobodySystems** is the **separately licensed, proprietary operational/control-plane layer** for teams that need these engines coordinated. The current **private alpha** supports a local controller, bounded guarded tools, operator interfaces, and evidence-bundle verification. Organization-wide policy lifecycle, cross-engine evidence correlation, fleet operations, production enterprise guarantees, and hosted management are **planned—not features of this OSS engine or delivered enterprise editions**.
+
+Start with the host-boundary proof below. See [NobodySystems integration and commercial boundary](docs/NOBODYSYSTEMS.md) for the concrete evaluator checklist, limits, independent OSS rights, and private-alpha access route.
+
 ## Proof before platform
 
 AgentContainment is easiest to evaluate from the bottom up:
@@ -514,7 +522,7 @@ See docs/SECURITY_CONTRACT.md for the current recovery evidence contract and tru
 
 ## Roadmap
 
-The project is intentionally evolving toward a broader provider-neutral agent security control plane. Roadmap work is explicitly separated from the controls listed as implemented above.
+AgentContainment is evolving as a provider-neutral **local enforcement and containment engine**. Organization-wide policy lifecycle, fleet administration, cross-engine evidence correlation, and enterprise operating commitments belong to the separate **NobodySystems** product direction, not to this OSS engine's shipped guarantees. Roadmap work is explicitly separated from the controls listed as implemented above.
 
 Near-term areas include:
 
