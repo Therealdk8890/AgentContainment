@@ -228,7 +228,7 @@ class ContainmentController:
         if self.egress is not None:
             enforce(
                 "connections_terminated",
-                lambda: self.egress.terminate_all(self.runtime.agent_id),
+                lambda: self.egress.terminate_all(self.runtime.agent_id, strict=True),
             )
 
         if self.process_containment is not None:
