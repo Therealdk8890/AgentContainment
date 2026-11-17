@@ -60,8 +60,13 @@ def test_failed_terminator_does_not_block_other_connections():
     assert gateway.egress.register_connection("agent-1", "bad", bad)
     assert gateway.egress.register_connection("agent-1", "good",
                                                lambda: closed.append("good"))
-    controller.contain()
+    report = controller.contain()
     assert closed == ["good"]
+    assert "connections_terminated" not in report.stages
+    assert any("connections_terminated" in failure for failure in report.failures)
+    assert report.complete is False
+    assert gateway.egress.active_connection_ids("agent-1") == ()
+    assert gateway.acquire_egress_lease() is None
 
 
 def test_connection_cannot_register_after_containment():
