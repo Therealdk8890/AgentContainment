@@ -61,19 +61,29 @@ class EgressController:
                 agent_id or self.runtime.agent_id, {}
             ))
 
-    def terminate_all(self, agent_id: str | None = None) -> int:
+    def terminate_all(self, agent_id: str | None = None, *, strict: bool = False) -> int:
+        """Attempt every close; optionally report incomplete termination.
+
+        The legacy non-strict API returns the number of successful callbacks.
+        Containment uses strict mode so a failed close degrades its report.
+        """
         target = agent_id or self.runtime.agent_id
         with self._lock:
-            terminators = list(self._connections.get(target, {}).values())
+            terminators = list(self._connections.get(target, {}).items())
             self._connections.pop(target, None)
 
         terminated = 0
-        for terminate in terminators:
+        failed_ids: list[str] = []
+        for connection_id, terminate in terminators:
             try:
                 terminate()
                 terminated += 1
             except Exception:
-                continue
+                failed_ids.append(connection_id)
+        if strict and failed_ids:
+            raise RuntimeError(
+                f"{len(failed_ids)} connection termination callback(s) failed"
+            )
         return terminated
 
 
