@@ -50,12 +50,17 @@ def test_missing_cgroup_state_fails_closed(tmp_path):
 
 
 def test_recreated_cgroup_fails_identity_verification(tmp_path):
-    path = _cgroup(tmp_path)
+    path = tmp_path / "agent-1.scope"
+    path.mkdir()
+    _cgroup(path)
     enforcer = CgroupV2Enforcer({"agent-1": path})
 
-    (path / "cgroup.kill").unlink()
-    (path / "cgroup.events").unlink()
-    path.rmdir()
+    # A different cgroup now lives at the bound path. On cgroupfs (kernfs) a
+    # recreated cgroup always gets a new inode number. On ordinary filesystems
+    # rmdir + mkdir can reuse the inode within one coarse ctime tick, which made
+    # this test fail intermittently (e.g. on ext4), so keep the old directory
+    # alive under another name: the replacement then has a distinct inode.
+    path.rename(tmp_path / "agent-1.scope.old")
     path.mkdir()
     (path / "cgroup.kill").write_text("")
     (path / "cgroup.events").write_text("populated 0\nfrozen 0\n")
