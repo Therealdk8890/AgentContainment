@@ -1,5 +1,9 @@
 # AgentContainment
 
+[![tests](https://github.com/Therealdk8890/AgentContainment/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Therealdk8890/AgentContainment/actions/workflows/tests.yml)
+[![hermetic-security](https://github.com/Therealdk8890/AgentContainment/actions/workflows/hermetic-security.yml/badge.svg?branch=main)](https://github.com/Therealdk8890/AgentContainment/actions/workflows/hermetic-security.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **Runtime containment and enforcement primitives for AI agents.**
 
 AgentContainment is the runtime enforcement layer. [WarrantKit](https://github.com/Therealdk8890/WarrantKit) is a separate, complementary project for signed Warrants, authority validation, epoch-fencing workflows, and integrations. A Warrant expresses and helps validate authority; AgentContainment's runtime-issued execution lease and enforcement path remain the side-effect boundary. Neither a valid Warrant nor a verified receipt, by itself, proves that every underlying claim is true. The projects are separately versioned and released.
